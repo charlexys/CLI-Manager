@@ -339,7 +339,7 @@ export function TerminalBackgroundSection() {
                   key={pos}
                   type="button"
                   onClick={() => patch({ position: pos })}
-                  className="ui-interactive ui-focus-ring ui-selection-card flex h-10 w-10 items-center justify-center rounded-lg border text-[10px]"
+                  className="ui-interactive ui-focus-ring flex h-10 w-10 items-center justify-center rounded-lg border text-[10px]"
                   data-selected={active ? "true" : "false"}
                   aria-pressed={active}
                   aria-label={`位置：${POSITION_LABEL[pos]}`}

@@ -51,6 +51,15 @@ function App() {
     closeBehaviorRef.current = closeBehavior;
   }, [closeBehavior]);
 
+  const runCloseAutoSync = useCallback(async () => {
+    const result = await useSyncStore.getState().runAutoSync("close");
+    if (result === "conflict") {
+      toast.warning("退出自动同步暂停", { description: "检测到云端与本地都有更新，请进入同步设置手动处理。" });
+    } else if (result === "error") {
+      toast.error("退出自动同步失败", { description: "请检查 WebDAV 配置或网络连接。" });
+    }
+  }, []);
+
   useKeyboardShortcuts();
 
   useEffect(() => {
@@ -69,6 +78,15 @@ function App() {
       const { projects, projectHealth } = useProjectStore.getState();
       const projectMap = new Map(projects.map((p) => [p.id, p]));
       await useTerminalStore.getState().restoreSessions(projectMap, projectHealth);
+
+      void (async () => {
+        const result = await useSyncStore.getState().runAutoSync("startup");
+        if (result === "conflict") {
+          toast.warning("自动同步暂停", { description: "检测到云端与本地都有更新，请进入同步设置手动处理。" });
+        } else if (result === "error") {
+          toast.error("启动自动同步失败", { description: "请检查 WebDAV 配置或网络连接。" });
+        }
+      })();
 
       if (!startupUpdateChecked) {
         startupUpdateChecked = true;
@@ -168,6 +186,7 @@ function App() {
     if (!IN_TAURI) return;
     const unlistenPromise = listen("tray-quit-requested", async () => {
       try {
+        await runCloseAutoSync();
         await useSessionStore.getState().clear();
       } finally {
         try {
@@ -181,7 +200,7 @@ function App() {
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [runCloseAutoSync]);
 
   // 关闭窗口拦截：根据 closeBehavior 决定最小化到托盘 / 直接退出 / 弹窗询问
   useEffect(() => {
@@ -200,7 +219,17 @@ function App() {
         return;
       }
       if (behavior === "exit") {
-        await useSessionStore.getState().clear();
+        event.preventDefault();
+        try {
+          await runCloseAutoSync();
+          await useSessionStore.getState().clear();
+        } finally {
+          try {
+            await appWindow.destroy();
+          } catch (err) {
+            logWarn("Failed to destroy window on close", err);
+          }
+        }
         return;
       }
       event.preventDefault();
@@ -210,7 +239,7 @@ function App() {
     return () => {
       unlistenPromise?.then((fn) => fn()).catch(() => {});
     };
-  }, []);
+  }, [runCloseAutoSync]);
 
   const handleCloseDialogMinimize = useCallback(
     (remember: boolean) => {
@@ -237,6 +266,7 @@ function App() {
       }
       void (async () => {
         try {
+          await runCloseAutoSync();
           await useSessionStore.getState().clear();
         } finally {
           try {
@@ -247,7 +277,7 @@ function App() {
         }
       })();
     },
-    [updateSetting]
+    [runCloseAutoSync, updateSetting]
   );
 
   useEffect(() => {

@@ -99,6 +99,8 @@ interface Settings {
   hookPopupNotificationsEnabled: boolean;
   hookPopupAutoCloseEnabled: boolean;
   hookPopupAutoCloseSeconds: number;
+  claudeHookConfigDir: string | null;
+  codexHookConfigDir: string | null;
 }
 
 interface SettingsStore extends Settings {
@@ -149,6 +151,8 @@ const DEFAULTS: Settings = {
   hookPopupNotificationsEnabled: true,
   hookPopupAutoCloseEnabled: true,
   hookPopupAutoCloseSeconds: 60,
+  claudeHookConfigDir: null,
+  codexHookConfigDir: null,
 };
 
 const LEGACY_LIGHT_PALETTE_MAP: Partial<Record<string, LightThemePalette>> = {
@@ -335,6 +339,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       3600,
       DEFAULTS.hookPopupAutoCloseSeconds
     );
+    entries.claudeHookConfigDir =
+      typeof entries.claudeHookConfigDir === "string" && entries.claudeHookConfigDir.trim()
+        ? entries.claudeHookConfigDir
+        : null;
+    entries.codexHookConfigDir =
+      typeof entries.codexHookConfigDir === "string" && entries.codexHookConfigDir.trim()
+        ? entries.codexHookConfigDir
+        : null;
 
     // 检测背景图是否仍存在；若不存在，仅在内存中清空 imagePath，保留 settings.json
     // 中的原配置，便于后续提示用户「之前选的图丢了」。

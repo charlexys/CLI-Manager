@@ -54,6 +54,7 @@
 
 ### Hook 设置增强
 
+- 修复 Claude / Codex Hook 自定义配置目录未持久化的问题，切换设置页后继续保留用户选择的安装位置。
 - Claude / Codex Hook 设置页新增运行中 Hook 安装状态，展示 `UserPromptSubmit` 是否已写入。
 - Codex Hook 安装状态新增 `config.toml` 路径与 `[features].hooks` 检查项，并将其纳入“已安装”判定。
 - Hook 弹框新增全局开关与自动关闭时间配置；关闭弹框后仍保留终端标签状态点更新。

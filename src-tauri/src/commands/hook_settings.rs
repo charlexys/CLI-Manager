@@ -349,8 +349,8 @@ pub async fn hook_settings_install_codex(
     selected_dir: Option<String>,
     codex_selected_dir: Option<String>,
 ) -> Result<HookSettingsStatus, String> {
-    let codex_dir = resolve_codex_dir(codex_selected_dir, true)?
-        .ok_or_else(|| "未找到用户目录，无法创建 Codex 配置目录".to_string())?;
+    let codex_dir = resolve_codex_dir(codex_selected_dir, false)?
+        .ok_or_else(|| "请先选择 Codex 配置目录".to_string())?;
     install_codex_hooks(&codex_dir)?;
     Ok(HookSettingsStatus {
         claude: build_claude_status(resolve_claude_dir(selected_dir, false)?)?,
@@ -1000,4 +1000,51 @@ fn remove_file_if_exists(path: &Path) -> Result<(), String> {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn install_codex_rejects_missing_selected_dir_without_creating_it() {
+        let tmp = TempDir::new().unwrap();
+        let missing_codex_dir = tmp.path().join("missing-codex");
+
+        let err = hook_settings_install_codex(None, Some(path_to_string(&missing_codex_dir)))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err, "选择的 Codex 配置目录不存在");
+        assert!(!missing_codex_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn install_codex_allows_existing_selected_dir() {
+        let tmp = TempDir::new().unwrap();
+        let claude_dir = tmp.path().join("claude");
+        let codex_dir = tmp.path().join("codex");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::create_dir_all(&codex_dir).unwrap();
+
+        let status = hook_settings_install_codex(
+            Some(path_to_string(&claude_dir)),
+            Some(path_to_string(&codex_dir)),
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(status.codex.status, HookInstallStatus::Installed));
+        assert!(codex_dir
+            .join("hooks")
+            .join(CODEX_ATTENTION_SCRIPT_NAME)
+            .is_file());
+        assert!(codex_dir
+            .join("hooks")
+            .join(CODEX_FINISHED_SCRIPT_NAME)
+            .is_file());
+        assert!(codex_dir.join(CODEX_HOOKS_FILE_NAME).is_file());
+        assert!(codex_dir.join(CODEX_CONFIG_FILE_NAME).is_file());
+    }
 }

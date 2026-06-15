@@ -460,7 +460,7 @@ export function HookSettingsPage() {
             <Button variant="light" color="cliPrimary" size="xs" onClick={handleSelectCodexDir} disabled={loading || claudeWorking || codexWorking}>
               选择 Codex 目录
             </Button>
-            <Button color="cliPrimary" size="xs" onClick={handleCodexInstall} disabled={loading || codexWorking}>
+            <Button color="cliPrimary" size="xs" onClick={handleCodexInstall} disabled={loading || codexWorking || codexStatus === "directoryMissing"}>
               {codexWorking ? "处理中..." : "安装 Codex Hook"}
             </Button>
             <Button variant="light" color="red" size="xs" onClick={handleCodexUninstall} disabled={loading || codexWorking || codexStatus === "directoryMissing"}>

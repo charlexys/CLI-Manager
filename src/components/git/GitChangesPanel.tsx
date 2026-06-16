@@ -13,7 +13,7 @@ interface GitChangesPanelProps {
 export function GitChangesPanel({ open, projectPath }: GitChangesPanelProps) {
   const { fetchChanges, reset, changes, loading, statusFilter, setStatusFilter } = useGitStore();
   const [diffModalOpen, setDiffModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<{ path: string; name: string } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<{ path: string; name: string; status: string } | null>(null);
 
   useEffect(() => {
     if (open && projectPath) {
@@ -33,8 +33,11 @@ export function GitChangesPanel({ open, projectPath }: GitChangesPanelProps) {
 
   const handleFileClick = (filePath: string) => {
     const fileName = filePath.split(/[\\/]/).pop() || filePath;
-    setSelectedFile({ path: filePath, name: fileName });
-    setDiffModalOpen(true);
+    const fileChange = changes.find(c => c.path === filePath);
+    if (fileChange) {
+      setSelectedFile({ path: filePath, name: fileName, status: fileChange.status });
+      setDiffModalOpen(true);
+    }
   };
 
   const allCount = changes.length;
@@ -138,6 +141,7 @@ export function GitChangesPanel({ open, projectPath }: GitChangesPanelProps) {
           projectPath={projectPath}
           filePath={selectedFile.path}
           fileName={selectedFile.name}
+          status={selectedFile.status}
         />
       )}
     </aside>

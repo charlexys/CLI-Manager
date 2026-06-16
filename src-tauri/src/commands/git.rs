@@ -181,8 +181,17 @@ fn get_diff_stats_git2(repo: &Repository, file_path: &str, staged: bool) -> (i32
 /// * `Ok(String)` - unified diff 格式的文本
 /// * `Err(String)` - 错误信息
 #[tauri::command]
-pub async fn git_get_file_diff(project_path: String, file_path: String) -> Result<String, String> {
-    log::info!("[git_get_file_diff] project_path: {}, file_path: {}", project_path, file_path);
+pub async fn git_get_file_diff(
+    project_path: String,
+    file_path: String,
+    status: String,
+) -> Result<String, String> {
+    log::info!(
+        "[git_get_file_diff] project_path: {}, file_path: {}, status: {}",
+        project_path,
+        file_path,
+        status
+    );
 
     tokio::task::spawn_blocking(move || {
         let path = Path::new(&project_path);
@@ -191,53 +200,120 @@ pub async fn git_get_file_diff(project_path: String, file_path: String) -> Resul
             return Err(format!("路径不存在: {}", project_path));
         }
 
-        let repo = Repository::open(path)
-            .map_err(|e| format!("打开仓库失败: {}", e))?;
+        let repo = Repository::open(path).map_err(|e| format!("打开仓库失败: {}", e))?;
 
-        // 获取 HEAD tree
-        let head = repo.head().map_err(|e| format!("获取 HEAD 失败: {}", e))?;
-        let head_tree = head.peel_to_tree().map_err(|e| format!("获取 HEAD tree 失败: {}", e))?;
+        // 针对不同状态使用不同策略
+        match status.as_str() {
+            "U" | "??" => {
+                // 未跟踪文件：直接读取内容作为全新增
+                let file_full_path = path.join(&file_path);
+                let content = std::fs::read_to_string(&file_full_path)
+                    .map_err(|e| format!("读取文件失败: {}", e))?;
 
-        // 创建 diff 选项
-        let mut diff_opts = git2::DiffOptions::new();
-        diff_opts.pathspec(&file_path);
-        diff_opts.context_lines(3);
+                let lines = content.lines().collect::<Vec<_>>();
+                let mut diff_text = format!("diff --git a/{} b/{}\n", file_path, file_path);
+                diff_text.push_str("new file mode 100644\n");
+                diff_text.push_str("--- /dev/null\n");
+                diff_text.push_str(&format!("+++ b/{}\n", file_path));
+                diff_text.push_str(&format!("@@ -0,0 +1,{} @@\n", lines.len()));
 
-        // 生成 diff（HEAD vs worktree）
-        let diff = repo.diff_tree_to_workdir_with_index(Some(&head_tree), Some(&mut diff_opts))
-            .map_err(|e| format!("生成 diff 失败: {}", e))?;
-
-        // 转换为 patch 文本
-        let mut patch_text = String::new();
-        diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
-            let origin = line.origin();
-            let content = std::str::from_utf8(line.content()).unwrap_or("");
-
-            match origin {
-                '+' | '-' | ' ' => {
-                    patch_text.push(origin);
-                    patch_text.push_str(content);
+                for line in lines {
+                    diff_text.push('+');
+                    diff_text.push_str(line);
+                    diff_text.push('\n');
                 }
-                'F' => {
-                    // 文件头
-                    patch_text.push_str("diff --git ");
-                    patch_text.push_str(content);
-                }
-                'H' => {
-                    // hunk 头
-                    patch_text.push_str("@@ ");
-                    patch_text.push_str(content);
-                }
-                _ => {
-                    patch_text.push_str(content);
-                }
+
+                Ok(diff_text)
             }
-            true
-        }).map_err(|e| format!("打印 diff 失败: {}", e))?;
+            "A" => {
+                // 新增文件（已暂存）：对比 index vs worktree
+                let mut diff_opts = git2::DiffOptions::new();
+                diff_opts.pathspec(&file_path);
+                diff_opts.context_lines(3);
 
-        log::info!("[git_get_file_diff] diff 生成成功，长度: {}", patch_text.len());
-        Ok(patch_text)
+                let diff = repo
+                    .diff_index_to_workdir(None, Some(&mut diff_opts))
+                    .map_err(|e| format!("生成 diff 失败: {}", e))?;
+
+                format_diff_to_text(diff, &file_path)
+            }
+            "D" => {
+                // 删除文件：对比 HEAD vs worktree（文件已不存在）
+                let head = repo.head().map_err(|e| format!("获取 HEAD 失败: {}", e))?;
+                let head_tree = head
+                    .peel_to_tree()
+                    .map_err(|e| format!("获取 HEAD tree 失败: {}", e))?;
+
+                let mut diff_opts = git2::DiffOptions::new();
+                diff_opts.pathspec(&file_path);
+                diff_opts.context_lines(3);
+
+                let diff = repo
+                    .diff_tree_to_workdir_with_index(Some(&head_tree), Some(&mut diff_opts))
+                    .map_err(|e| format!("生成 diff 失败: {}", e))?;
+
+                format_diff_to_text(diff, &file_path)
+            }
+            _ => {
+                // 修改文件（M）、重命名（R）：对比 HEAD vs worktree
+                let head = repo.head().map_err(|e| format!("获取 HEAD 失败: {}", e))?;
+                let head_tree = head
+                    .peel_to_tree()
+                    .map_err(|e| format!("获取 HEAD tree 失败: {}", e))?;
+
+                let mut diff_opts = git2::DiffOptions::new();
+                diff_opts.pathspec(&file_path);
+                diff_opts.context_lines(3);
+
+                let diff = repo
+                    .diff_tree_to_workdir_with_index(Some(&head_tree), Some(&mut diff_opts))
+                    .map_err(|e| format!("生成 diff 失败: {}", e))?;
+
+                format_diff_to_text(diff, &file_path)
+            }
+        }
     })
     .await
     .map_err(|e| format!("任务失败: {}", e))?
+}
+
+fn format_diff_to_text(diff: git2::Diff, file_path: &str) -> Result<String, String> {
+    let mut patch_text = String::new();
+
+    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        let origin = line.origin();
+        let content = std::str::from_utf8(line.content()).unwrap_or("");
+
+        match origin {
+            '+' | '-' | ' ' => {
+                patch_text.push(origin);
+                patch_text.push_str(content);
+            }
+            'F' => {
+                // 文件头
+                patch_text.push_str("diff --git ");
+                patch_text.push_str(content);
+            }
+            'H' => {
+                // hunk 头
+                patch_text.push_str("@@ ");
+                patch_text.push_str(content);
+            }
+            _ => {
+                patch_text.push_str(content);
+            }
+        }
+        true
+    })
+    .map_err(|e| format!("打印 diff 失败: {}", e))?;
+
+    if patch_text.is_empty() {
+        return Err(format!("文件 {} 无变更", file_path));
+    }
+
+    log::info!(
+        "[git_get_file_diff] diff 生成成功，长度: {}",
+        patch_text.len()
+    );
+    Ok(patch_text)
 }

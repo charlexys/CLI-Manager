@@ -1,4 +1,4 @@
-import { ChevronRight, Folder } from "../icons";
+import { ChevronRight } from "../icons";
 import type { GitTreeNode } from "../../lib/types";
 import { GitStatusIcon } from "./GitStatusIcon";
 import { useGitStore } from "../../stores/gitStore";
@@ -17,26 +17,27 @@ export function GitTreeNodeComponent({ node, depth, onFileClick }: GitTreeNodePr
   const indentPx = depth * 12 + 4;
 
   if (node.type === "file") {
-    const { icon: FileIconComponent, color } = getFileIcon(node.name);
+    // 获取 Material Design 文件图标（base64 data URI）
+    const iconDataUri = getMaterialFileIcon(node.name);
 
     // 根据 Git 状态给文件名着色
-    let fileNameColor = TERM.fg; // 默认前景色
+    let fileNameColor = TERM.fg;
     if (node.change) {
       switch (node.change.status) {
-        case "M": // 修改
+        case "M":
           fileNameColor = TERM.blue;
           break;
-        case "A": // 新增（已暂存）
+        case "A":
           fileNameColor = TERM.green;
           break;
-        case "D": // 删除
+        case "D":
           fileNameColor = "#808080";
           break;
-        case "U": // 未跟踪
+        case "U":
         case "??":
           fileNameColor = TERM.red;
           break;
-        case "R": // 重命名
+        case "R":
           fileNameColor = TERM.magenta;
           break;
         default:
@@ -52,7 +53,14 @@ export function GitTreeNodeComponent({ node, depth, onFileClick }: GitTreeNodePr
         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
         onClick={() => onFileClick(node.path)}
       >
-        <FileIconComponent size={11} strokeWidth={1.5} style={{ color }} className="shrink-0" />
+        <img
+          src={iconDataUri}
+          alt=""
+          width={14}
+          height={14}
+          className="shrink-0"
+          style={{ objectFit: "contain" }}
+        />
         <span className="flex-1 truncate" style={{ color: fileNameColor }}>{node.name}</span>
         {node.change && (
           <>
@@ -74,8 +82,9 @@ export function GitTreeNodeComponent({ node, depth, onFileClick }: GitTreeNodePr
     );
   }
 
-  // 目录节点
+  // 目录节点 - 使用 Material Design 文件夹图标
   const hasChildren = node.children && node.children.length > 0;
+  const folderIconDataUri = getMaterialFolderIcon(node.name, !isCollapsed);
 
   return (
     <div>
@@ -95,7 +104,14 @@ export function GitTreeNodeComponent({ node, depth, onFileClick }: GitTreeNodePr
         >
           <ChevronRight size={10} strokeWidth={2} />
         </span>
-        <Folder size={11} strokeWidth={1.5} style={{ color: TERM.yellow }} className="shrink-0" />
+        <img
+          src={folderIconDataUri}
+          alt=""
+          width={14}
+          height={14}
+          className="shrink-0"
+          style={{ objectFit: "contain" }}
+        />
         <span className="flex-1 truncate" style={{ color: TERM.fg }}>{node.name}</span>
         {hasChildren && (
           <span className="text-[9px] rounded px-1 py-0" style={{ color: TERM.dim, backgroundColor: `${TERM.dim}20` }}>

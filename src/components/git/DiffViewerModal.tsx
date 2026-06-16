@@ -11,9 +11,10 @@ interface DiffViewerModalProps {
   projectPath: string;
   filePath: string;
   fileName: string;
+  status: string;
 }
 
-export function DiffViewerModal({ open, onClose, projectPath, filePath, fileName }: DiffViewerModalProps) {
+export function DiffViewerModal({ open, onClose, projectPath, filePath, fileName, status }: DiffViewerModalProps) {
   const [diffText, setDiffText] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +29,7 @@ export function DiffViewerModal({ open, onClose, projectPath, filePath, fileName
     let cancelled = false;
     setLoading(true);
 
-    invoke<string>("git_get_file_diff", { projectPath, filePath })
+    invoke<string>("git_get_file_diff", { projectPath, filePath, status })
       .then((diff) => {
         if (cancelled) return;
         setDiffText(diff);
@@ -46,7 +47,7 @@ export function DiffViewerModal({ open, onClose, projectPath, filePath, fileName
     return () => {
       cancelled = true;
     };
-  }, [open, projectPath, filePath]);
+  }, [open, projectPath, filePath, status]);
 
   if (!open) return null;
 

@@ -32,11 +32,14 @@ export function DiffViewerModal({ open, onClose, projectPath, filePath, fileName
     invoke<string>("git_get_file_diff", { projectPath, filePath, status })
       .then((diff) => {
         if (cancelled) return;
+        console.log("[DiffViewerModal] 后端返回 diff 长度:", diff.length);
+        console.log("[DiffViewerModal] diff 前 200 字符:", diff.substring(0, 200));
         setDiffText(diff);
         setError(null);
       })
       .catch((err) => {
         if (cancelled) return;
+        console.error("[DiffViewerModal] 获取 diff 失败:", err);
         setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
@@ -56,9 +59,12 @@ export function DiffViewerModal({ open, onClose, projectPath, filePath, fileName
 
   if (diffText) {
     try {
+      console.log("[DiffViewerModal] 开始解析 diff，长度:", diffText.length);
       const files = parseDiff(diffText);
+      console.log("[DiffViewerModal] 解析结果文件数:", files.length);
       if (files.length > 0) {
         parsedDiff = files[0];
+        console.log("[DiffViewerModal] hunks 数量:", parsedDiff.hunks.length);
         tokens = tokenize(parsedDiff.hunks);
       }
     } catch (err) {

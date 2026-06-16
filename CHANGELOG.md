@@ -19,7 +19,7 @@
 - 应用版本同步升级到 1.0.8（npm、Cargo、Tauri 配置）。
 
 ## [V1.0.7] - 2026-06-15
-111
+
 ### 终端实时统计面板
 
 - **新增 SessionStart Hook**：Claude / Codex 在会话启动 / 恢复时即回传 sessionId 并绑定到对应终端 Tab（不改变 Tab 运行状态），实时统计面板无需先发送一条指令即可填充会话数据；Hook 设置页同步新增「会话启动 Hook（SessionStart）」安装状态检查项，重新安装一次 Hook 即可补写该条目。

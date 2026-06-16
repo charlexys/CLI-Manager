@@ -290,16 +290,31 @@ fn format_diff_to_text(diff: git2::Diff, file_path: &str) -> Result<String, Stri
                 patch_text.push_str(content);
             }
             'F' => {
-                // 文件头
+                // 文件头（diff --git a/... b/...）
                 patch_text.push_str("diff --git ");
                 patch_text.push_str(content);
             }
             'H' => {
-                // hunk 头
+                // hunk 头（@@ -1,2 +3,4 @@）
                 patch_text.push_str("@@ ");
                 patch_text.push_str(content);
             }
+            '<' => {
+                // --- a/file
+                patch_text.push_str("--- ");
+                patch_text.push_str(content);
+            }
+            '>' => {
+                // +++ b/file
+                patch_text.push_str("+++ ");
+                patch_text.push_str(content);
+            }
+            '=' => {
+                // 分隔符
+                patch_text.push_str(content);
+            }
             _ => {
+                // 其他元数据（index, mode 等）
                 patch_text.push_str(content);
             }
         }

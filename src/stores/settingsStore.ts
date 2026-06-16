@@ -64,6 +64,7 @@ export interface TerminalToolbarVisibilitySettings {
   commandHistory: boolean;
   fullscreen: boolean;
   sessionHistory: boolean;
+  stats: boolean;
   showText: boolean;
 }
 
@@ -145,6 +146,7 @@ interface Settings {
   terminalNewlineShortcut: TerminalNewlineShortcut;
   unsplitBehavior: UnsplitBehavior;
   terminalToolbarVisibility: TerminalToolbarVisibilitySettings;
+  terminalToolbarOrder: string[];
   shellRuntimeMonitoringEnabled: boolean;
   ccusageAnalyticsEnabled: boolean;
   terminalBackground: TerminalBackgroundSettings;
@@ -201,8 +203,10 @@ const DEFAULTS: Settings = {
     commandHistory: true,
     fullscreen: true,
     sessionHistory: true,
+    stats: true,
     showText: false,
   },
+  terminalToolbarOrder: ["new", "templates", "commandHistory", "fullscreen", "sessionHistory", "stats"],
   shellRuntimeMonitoringEnabled: false,
   ccusageAnalyticsEnabled: false,
   terminalBackground: {
@@ -294,8 +298,19 @@ export function migrateTerminalToolbarVisibility(value: unknown): TerminalToolba
     commandHistory: typeof raw.commandHistory === "boolean" ? raw.commandHistory : defaults.commandHistory,
     fullscreen: typeof raw.fullscreen === "boolean" ? raw.fullscreen : defaults.fullscreen,
     sessionHistory: typeof raw.sessionHistory === "boolean" ? raw.sessionHistory : defaults.sessionHistory,
+    stats: typeof raw.stats === "boolean" ? raw.stats : defaults.stats,
     showText: typeof raw.showText === "boolean" ? raw.showText : defaults.showText,
   };
+}
+
+export function migrateTerminalToolbarOrder(value: unknown): string[] {
+  const defaults = DEFAULTS.terminalToolbarOrder;
+  if (!Array.isArray(value)) return [...defaults];
+
+  const validKeys = new Set(defaults);
+  const filtered = value.filter((k): k is string => typeof k === "string" && validKeys.has(k));
+  const missing = defaults.filter((k) => !filtered.includes(k));
+  return [...filtered, ...missing];
 }
 
 function migrateUnsplitBehavior(value: unknown): UnsplitBehavior {
@@ -435,6 +450,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       : DEFAULTS.collapsedGroupIds;
 
     entries.terminalToolbarVisibility = migrateTerminalToolbarVisibility(entries.terminalToolbarVisibility);
+    entries.terminalToolbarOrder = migrateTerminalToolbarOrder(entries.terminalToolbarOrder);
     entries.unsplitBehavior = migrateUnsplitBehavior(entries.unsplitBehavior);
     entries.showProjectTreeBadges =
       typeof entries.showProjectTreeBadges === "boolean"

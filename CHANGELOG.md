@@ -1,5 +1,38 @@
 # Changelog
 
+## [V1.1.0] - 2026-06-16
+
+### 终端工具栏按钮自定义排序
+
+#### 核心功能
+
+- **工具栏按钮拖拽排序**：终端标签栏右侧工具栏的所有按钮（新建、Templates、历史命令、全屏、会话历史、统计）支持拖拽调整显示顺序，按用户偏好自由排列。
+- **拖拽视觉反馈**：拖动中按钮半透明（`opacity: 0.4`）、DragOverlay 跟随鼠标、插入位置指示器、光标变为 `grabbing`，与现有终端标签拖拽体验保持一致。
+- **激活距离阈值**：5px 激活距离有效区分点击与拖动，避免误触。
+- **持久化配置**：按钮顺序保存到本地设置（`terminalToolbarOrder` 字段），应用重启后保持用户自定义顺序。
+
+#### 统计按钮显隐控制
+
+- **新增统计按钮开关**：设置页面「通用设置 - 工具栏」区块新增「统计」显隐开关（默认显示），用户可按需隐藏统计按钮。
+- **统一管理**：所有工具栏按钮（除「新建」外）现在都支持显隐控制 + 拖拽排序，数据模型统一。
+
+#### 会话历史图标优化
+
+- **自定义图标**：会话历史按钮图标从 `Search` 替换为自定义 `ListClockIcon`（列表 + 时钟组合），语义更贴近"历史记录"，尺寸优化为 20px。
+
+#### 技术实现
+
+- **数据层**：`settingsStore.ts` 新增 `terminalToolbarOrder: string[]` 字段（默认 `["new", "templates", "commandHistory", "fullscreen", "sessionHistory", "stats"]`）、`TerminalToolbarVisibilitySettings.stats: boolean`（默认 `true`）、`migrateTerminalToolbarOrder` 迁移函数。
+- **UI 层**：`TerminalTabs.tsx` 使用 `@dnd-kit/sortable` 实现工具栏按钮拖拽排序（独立 `DndContext`，不与终端标签拖拽冲突）、按 `terminalToolbarOrder` 顺序渲染、统计按钮接入 `visibility.stats` 条件渲染。
+- **设置页**：`GeneralSettingsPage.tsx` 新增「统计」开关，保持设置页职责单一（仅管理显隐，排序在工具栏操作）。
+- **图标组件**：新增 `src/components/ListClockIcon.tsx` 自定义 SVG 图标组件，兼容 lucide API（支持 `size` 属性）。
+
+#### 代码质量
+
+- TypeScript 类型检查通过，所有字段类型安全。
+- 迁移函数处理边界场景（过滤无效 key、补全缺失 key、兼容旧配置）。
+- 拖拽实现复用现有模式（与终端标签拖拽保持一致）。
+
 ## [V1.0.9] - 2026-06-16
 
 ### 设置 - 供应商页全面优化

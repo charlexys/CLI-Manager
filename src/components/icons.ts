@@ -29,3 +29,5 @@ export {
   Upload,
   X,
 } from "lucide-react";
+
+export { ListClockIcon } from "./ListClockIcon";

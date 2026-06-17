@@ -32,6 +32,7 @@ import { TerminalStatsPanel } from "./terminal/TerminalStatsPanel";
 import { TerminalSidePanel, type TerminalSidePanelTab } from "./terminal/TerminalSidePanel";
 import { openWindowsTerminal } from "../lib/externalTerminal";
 import { Terminal, Plus, ListClockIcon, X, Maximize2, Minimize2, ChevronDown, ChevronRight, BarChart3, GitBranch } from "./icons";
+import { VendorIcon, inferVendor, type VendorKey } from "./VendorIcon";
 import { EmptyState } from "./ui/EmptyState";
 import { useHistoryStore } from "../stores/historyStore";
 import type { HistorySourceFilter, Project, TerminalSession } from "../lib/types";
@@ -149,6 +150,11 @@ function resolveHistorySourceFilter(cliTool: string | null | undefined): History
   return "all";
 }
 
+// 终端 Tab 厂商图标：从启动命令 + 标题推断（未配自定义启动命令时 startupCmd 即为 cli_tool）
+function inferSessionVendor(session: TerminalSession): VendorKey | null {
+  return inferVendor(`${session.startupCmd ?? ""} ${session.title}`);
+}
+
 function formatTabStatusUpdatedAt(value: string | null | undefined): string {
   if (!value) return "无";
   const date = new Date(value);
@@ -188,6 +194,7 @@ interface SortableTabProps {
   isEditing: boolean;
   notification: TabNotificationState;
   statusUpdatedAt: string | null;
+  vendor?: VendorKey | null;
   onActivate: () => void;
   onClose: () => void;
   onStartEdit: () => void;
@@ -206,6 +213,7 @@ function SortableTab({
   isEditing,
   notification,
   statusUpdatedAt,
+  vendor,
   onActivate,
   onClose,
   onStartEdit,
@@ -282,6 +290,11 @@ function SortableTab({
             aria-label={statusLabel}
             title={statusTitle}
           />
+          {vendor && (
+            <span className="inline-flex shrink-0 items-center" aria-hidden="true">
+              <VendorIcon vendor={vendor} size={14} />
+            </span>
+          )}
           {isEditing ? (
             <input
               ref={editInputRef}
@@ -345,10 +358,12 @@ function DragOverlayTab({
   title,
   notification,
   statusUpdatedAt,
+  vendor,
 }: {
   title: string;
   notification: TabNotificationState;
   statusUpdatedAt: string | null;
+  vendor?: VendorKey | null;
 }) {
   const statusLabel = TAB_NOTIFICATION_LABELS[notification];
   const statusTitle = `状态：${statusLabel}\n会话：${title}\n更新时间：${formatTabStatusUpdatedAt(statusUpdatedAt)}`;
@@ -366,6 +381,11 @@ function DragOverlayTab({
         style={{ backgroundColor: TAB_NOTIFICATION_COLORS[notification], color: TAB_NOTIFICATION_COLORS[notification] }}
         aria-hidden="true"
       />
+      {vendor && (
+        <span className="inline-flex shrink-0 items-center" aria-hidden="true">
+          <VendorIcon vendor={vendor} size={14} />
+        </span>
+      )}
       <span className="min-w-0 flex-1 truncate tracking-[0.01em]">{title}</span>
       {notification !== "none" && <span className="shrink-0 text-[10px] leading-none text-on-surface-variant">{statusLabel}</span>}
     </div>
@@ -648,6 +668,7 @@ function PaneTabBar({
               isEditing={editingSessionId === session.id}
               notification={tabNotifications[session.id] ?? "none"}
               statusUpdatedAt={tabStatusDetails[session.id]?.updatedAt ?? null}
+              vendor={inferSessionVendor(session)}
               onActivate={() => onActivateSession(session.id)}
               onClose={() => onCloseSession(session.id)}
               onStartEdit={() => onStartEdit(session.id)}
@@ -1650,6 +1671,7 @@ export function TerminalTabs({ fullscreen = false, onToggleFullscreen }: Termina
                       title={activeDragSession.title}
                       notification={tabNotifications[activeDragSession.id] ?? "none"}
                       statusUpdatedAt={tabStatusDetails[activeDragSession.id]?.updatedAt ?? null}
+                      vendor={inferSessionVendor(activeDragSession)}
                     />
                   ) : null}
                 </DragOverlay>

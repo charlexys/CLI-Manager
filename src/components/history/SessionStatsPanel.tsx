@@ -4,9 +4,8 @@ import type { HistorySessionDetail, HistorySessionView } from "../../lib/types";
 import { fetchTodayProjectStats, type TodayProjectStats } from "../../stores/historyStore";
 import {
   TERM,
-  SOURCE_COLORS,
   StatCard,
-  HeaderPill,
+  SourcePill,
   Row,
   StatChip,
   EmptyHint,
@@ -38,7 +37,7 @@ function SessionInfoCard({
       icon={<FolderGit2 size={13} />}
       title="会话"
       headerRight={
-        <HeaderPill color={SOURCE_COLORS[view.source] ?? TERM.cyan}>{view.source}</HeaderPill>
+        <SourcePill source={view.source} />
       }
     >
       <Row label="项目" value={view.project_key} title={view.project_key} />

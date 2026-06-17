@@ -1,5 +1,6 @@
 import { Activity, CalendarClock, Coins, Cpu, Wrench } from "lucide-react";
 import type { HistorySessionDetail, HistoryToolCount } from "../../lib/types";
+import { VendorIcon, inferVendor } from "../VendorIcon";
 import { getContextLimit } from "../../lib/modelPricing";
 import type { TodayProjectStats } from "../../stores/historyStore";
 import {
@@ -103,6 +104,7 @@ export function ModelContextCard({
   // 未绑定空态（session 为 null）补骨架占位（徽章/剩余行/进度条），高度与有数据时一致；
   // 非空会话维持原生行为，历史会话面板不受影响
   const isEmpty = !session;
+  const modelVendor = inferVendor(stats.dominantModel);
 
   return (
     <StatCard
@@ -116,7 +118,17 @@ export function ModelContextCard({
         ) : undefined
       }
     >
-      <Row label="模型" value={stats.dominantModel || "—"} color={TERM.magenta} />
+      <div className="flex items-center justify-between gap-2 text-[11px] leading-5">
+        <span className="shrink-0" style={{ color: TERM.dim }}>模型</span>
+        <span
+          className="flex min-w-0 items-center gap-1 truncate text-right"
+          style={{ color: TERM.magenta }}
+          title={stats.dominantModel || "—"}
+        >
+          {modelVendor && <VendorIcon vendor={modelVendor} size={12} />}
+          <span className="truncate">{stats.dominantModel || "—"}</span>
+        </span>
+      </div>
       <Row
         label="当前上下文"
         value={contextTokens !== null ? formatCompactCount(contextTokens) : "—"}

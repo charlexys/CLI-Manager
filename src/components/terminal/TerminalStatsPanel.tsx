@@ -11,9 +11,8 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import {
   TERM,
-  SOURCE_COLORS,
   StatCard,
-  HeaderPill,
+  SourcePill,
   Row,
   StatChip,
   SegmentedBar,
@@ -146,7 +145,7 @@ function SessionInfoCard({ session, statsSession, projectName, projectPath, curr
       icon={<FolderGit2 size={13} />}
       title="会话"
       headerRight={
-        <HeaderPill color={SOURCE_COLORS[session.source] ?? TERM.cyan}>{session.source}</HeaderPill>
+        <SourcePill source={session.source} />
       }
     >
       <Row icon={<FolderGit2 size={10} />} label="项目" value={projectName} title={projectName} />
@@ -374,7 +373,7 @@ export function TerminalStatsPanel({ activeSessionId, open, visible = true, embe
           <LiveDot />
           实时统计
           {sourceFilter && (
-            <HeaderPill color={SOURCE_COLORS[sourceFilter] ?? TERM.cyan}>{sourceFilter}</HeaderPill>
+            <SourcePill source={sourceFilter} />
           )}
         </span>
         <span className="flex items-center gap-1.5 text-[10px]" style={{ color: TERM.dim }}>

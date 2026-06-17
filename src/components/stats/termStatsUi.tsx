@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { HistorySessionDetail } from "../../lib/types";
 import { calculateCost, inferDominantModel } from "../../lib/modelPricing";
+import { VendorIcon, inferVendor } from "../VendorIcon";
 
 // 终端监控面板配色（btop / 系统监控风格，深色卡片 + 绿色点缀）
 export const TERM = {
@@ -200,6 +201,19 @@ export function HeaderPill({ children, color = TERM.green }: { children: React.R
     >
       {children}
     </span>
+  );
+}
+
+// 来源徽章（claude / codex）：在原配色胶囊内前置品牌图标
+export function SourcePill({ source }: { source: string }) {
+  const vendor = inferVendor(source);
+  return (
+    <HeaderPill color={SOURCE_COLORS[source] ?? TERM.cyan}>
+      <span className="inline-flex items-center gap-1">
+        {vendor && <VendorIcon vendor={vendor} size={11} />}
+        {source}
+      </span>
+    </HeaderPill>
   );
 }
 

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { ChevronDown } from "./icons";
 import { Input } from "./ui/input";
 import { Select } from "./ui/select";
+import { VendorIcon, inferVendor } from "./VendorIcon";
 import { Textarea } from "./ui/textarea";
 import {
   Dialog,
@@ -225,14 +226,21 @@ export function ConfigModal({ project, cloneFrom, defaultGroupId, onClose }: Pro
 
               <div>
                 <label className="mb-1 block text-xs text-text-muted">CLI 工具</label>
-                <Input
-                  type="text"
-                  value={cliTool}
-                  onChange={(e) => setCliTool(e.target.value)}
-                  placeholder="claude / codex / custom"
-                  list="cli-tool-options"
-                  className="text-sm"
-                />
+                <div className="relative">
+                  {inferVendor(cliTool) && (
+                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2">
+                      <VendorIcon vendor={inferVendor(cliTool)} size={16} />
+                    </span>
+                  )}
+                  <Input
+                    type="text"
+                    value={cliTool}
+                    onChange={(e) => setCliTool(e.target.value)}
+                    placeholder="claude / codex / custom"
+                    list="cli-tool-options"
+                    className={`text-sm ${inferVendor(cliTool) ? "pl-9" : ""}`}
+                  />
+                </div>
                 <datalist id="cli-tool-options">
                   {CLI_TOOL_OPTIONS.map((tool) => (
                     <option key={tool} value={tool} />

@@ -8,6 +8,7 @@ import { useTreeActions } from "./TreeContext";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { Folder, Terminal, Play, ChevronRight, AlertTriangle } from "../icons";
+import { VendorIcon, inferVendor } from "../VendorIcon";
 
 const STATUS_COLORS: Record<SessionStatus, string> = {
   running: "#9ece6a",
@@ -84,6 +85,7 @@ function TreeNodeItemImpl({ node, depth, density, focusedNodeKey, onFocusNode }:
     const isMultiSelected = actions.selectedProjectIds.has(p.id);
     const status = actions.getProjectStatus(p.id);
     const pathInvalid = actions.isPathInvalid(p.id);
+    const cliVendor = p.cli_tool ? inferVendor(p.cli_tool) : null;
 
     return (
       <div
@@ -126,12 +128,23 @@ function TreeNodeItemImpl({ node, depth, density, focusedNodeKey, onFocusNode }:
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="block truncate font-medium">{p.name}</span>
             {showProjectTreeBadges && p.cli_tool && (
-              <span
-                className="ui-tree-meta-chip inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-tight"
-                data-cli-tool={p.cli_tool.trim().toLowerCase()}
-              >
-                {p.cli_tool}
-              </span>
+              cliVendor ? (
+                <span
+                  className="inline-flex shrink-0 items-center justify-center leading-none"
+                  data-cli-tool={p.cli_tool.trim().toLowerCase()}
+                  title={p.cli_tool}
+                  aria-label={`CLI 工具：${p.cli_tool}`}
+                >
+                  <VendorIcon vendor={cliVendor} size={13} />
+                </span>
+              ) : (
+                <span
+                  className="ui-tree-meta-chip inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-tight"
+                  data-cli-tool={p.cli_tool.trim().toLowerCase()}
+                >
+                  {p.cli_tool}
+                </span>
+              )
             )}
             {showProjectTreeBadges && providerBadge && (
               <span

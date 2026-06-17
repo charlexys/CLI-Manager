@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { HistoryStatsModelItem } from "../../lib/types";
+import { VendorIcon, inferVendor } from "../VendorIcon";
 
 interface ModelSegment {
   key: string;
@@ -103,7 +104,9 @@ export function StatsModelComposition({ items }: StatsModelCompositionProps) {
           </div>
 
           <div className="mt-2 space-y-1.5">
-            {normalized.map((segment, idx) => (
+            {normalized.map((segment, idx) => {
+              const vendor = segment.key === "__other__" ? null : inferVendor(segment.label);
+              return (
               <button
                 key={segment.key}
                 type="button"
@@ -119,13 +122,15 @@ export function StatsModelComposition({ items }: StatsModelCompositionProps) {
                     className="inline-block h-2.5 w-2.5 rounded-sm"
                     style={{ backgroundColor: MODEL_COLORS[idx % MODEL_COLORS.length] }}
                   />
+                  {vendor && <VendorIcon vendor={vendor} size={13} />}
                   <span className="truncate">{segment.label}</span>
                 </span>
                 <span className="shrink-0 text-text-muted">
                   {formatPercent(segment.ratio)} · {formatCount(segment.sessions)}
                 </span>
               </button>
-            ))}
+              );
+            })}
           </div>
         </>
       )}

@@ -1938,6 +1938,31 @@ samp,
   background-color: color-mix(in srgb, var(--text-muted) 48%, transparent);
 }
 
+.ui-terminal-bg-layer .xterm .xterm-viewport {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--terminal-theme-foreground, var(--text-muted)) 36%, transparent) transparent;
+}
+
+.ui-terminal-bg-layer .xterm .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ui-terminal-bg-layer .xterm .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ui-terminal-bg-layer .xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  background-color: color-mix(in srgb, var(--terminal-theme-foreground, var(--text-muted)) 30%, transparent);
+}
+
+.ui-terminal-bg-layer .xterm .xterm-viewport:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--terminal-theme-foreground, var(--text-muted)) 52%, transparent);
+}
+
 .diff-code-inner {
   width: max-content;
   min-width: 100%;

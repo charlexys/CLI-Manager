@@ -322,6 +322,9 @@ pub fn run() {
             commands::git::get_current_git_branch,
             commands::git::git_get_changes,
             commands::git::git_get_file_diff,
+            commands::git::git_discard_file,
+            commands::git::git_revert_hunk,
+            commands::git::git_revert_lines,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,29 @@
 # Changelog
 
+## [V1.1.5] - 2026-06-18
+
+### Git 变更面板增强（真实行数 / 实时监听 / 语法高亮）
+
+#### 真实 diff 行数统计
+
+- **修复每文件 +N/−M 恒为 0 的问题**：`git_get_changes` 此前对 diff 行数返回占位值 `(0, 0)`（`get_diff_stats_git2` 未实现），文件树虽已渲染增删数字却始终为 0。现以单次 `diff_tree_to_workdir_with_index`（含未跟踪、`context_lines(0)`）+ `foreach` 行回调，按路径累加真实新增/删除行数，替代原本逐文件多次 diff 的 N 次扫描。
+- **面板顶部总增删聚合**：Git 变更面板摘要区新增整仓 `+X −Y` 汇总（绿/红，与终端配色一致）。
+- **边界处理**：未跟踪文件计为 `+行数 −0`、删除文件计为 `+0 −行数`、二进制/纯模式变更为 0/0；空仓库 / unborn HEAD 与 diff 构造失败均优雅降级，不 panic。
+
+#### fs-watcher 替代定时轮询
+
+- **实时文件监听**：新增 `git_watcher` 桥接（基于 `notify` + `notify-debouncer-mini`），监听当前项目目录，去抖 400ms 后向前端发 `git-changed` 事件；面板由事件驱动刷新，去掉原 4s 固定轮询与最长 4s 延迟。
+- **精准监听范围**：监听工作区文件变化与 `.git/index`、`.git/HEAD`（覆盖编辑 / 暂存 / 提交 / 切分支），过滤 `.git/objects`、`.git/logs`、`*.lock` 等噪声。
+- **降级兜底**：watcher 初始化失败（网络盘 / WSL 等 notify 不可用）时自动降级为 15s 慢轮询；保留失焦/隐藏不刷新、重新聚焦立即刷新一次。
+- **生命周期与多窗口隔离**：单 watcher 绑定当前活动项目，切项目/关闭面板即释放；`git-changed` 事件携带 `projectPath`，各窗口按自身当前项目过滤，天然隔离。
+- 新增 Tauri 命令 `git_watch_start` / `git_watch_stop`，前端不可信路径在后端做存在性校验。
+
+#### Diff 语法高亮
+
+- **diff 弹窗按语言高亮**：`DiffViewerModal` 接入 `react-diff-view` 原生支持的 refractor(Prism) tokenize，按文件扩展名启用语法高亮，token 高亮叠加在既有 +/− 行底色之上，行号、行选择与 hunk/行级回滚交互保持不变。
+- **精选语言控体积**：`refractor/core` 按依赖顺序注册 22 种常见语言（js/jsx/ts/tsx/json/css/scss/html/md/bash/rust/python/yaml/toml/sql/go/java/c/cpp/ruby/diff 等）；未知语言或高亮失败时回退无高亮渲染，diff 始终可读。
+- 新增 `src/components/git/diffHighlight.ts`（refractor 实例与语言探测），新增 Prism token 深色配色到 `diffViewer.css`，scoped 到 `.diff-viewer-container`。
+
 ## [V1.1.4] - 2026-06-18
 
 ### 侧边栏项目树多选与工具栏精简

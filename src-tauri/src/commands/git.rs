@@ -1,6 +1,9 @@
 use git2::{Repository, StatusOptions};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use tauri::{AppHandle, State};
+
+use crate::git_watcher::GitWatcherBridge;
 
 /// 查询指定路径的当前 git 分支
 ///
@@ -96,6 +99,9 @@ pub async fn git_get_changes(project_path: String) -> Result<Vec<GitFileChange>,
 
         log::info!("[git_get_changes] 获取到 {} 个状态条目", statuses.len());
 
+        // 一次性构造 repo 级 diff，得到所有文件的真实增删行数，避免逐文件多次 diff。
+        let stats = compute_diff_line_stats(&repo);
+
         let mut changes = Vec::new();
 
         for entry in statuses.iter() {
@@ -109,12 +115,11 @@ pub async fn git_get_changes(project_path: String) -> Result<Vec<GitFileChange>,
             // 解析状态
             let (status_char, staged) = parse_git2_status(status);
 
-            // 对于已跟踪文件，尝试获取 diff 统计
-            let (added, deleted) = if status.is_wt_new() {
-                (0, 0) // 新文件暂不统计
-            } else {
-                get_diff_stats_git2(&repo, &file_path, staged)
-            };
+            // 从统计表按归一化路径取真实增删；二进制 / 纯模式变更查不到时为 (0, 0)。
+            let (added, deleted) = stats
+                .get(&normalize_path(&file_path))
+                .copied()
+                .unwrap_or((0, 0));
 
             changes.push(GitFileChange {
                 path: file_path,
@@ -167,12 +172,65 @@ fn parse_git2_status(status: git2::Status) -> (&'static str, bool) {
     ("M", false) // 默认
 }
 
-fn get_diff_stats_git2(repo: &Repository, file_path: &str, staged: bool) -> (i32, i32) {
-    // 简化版：仅返回 0，完整实现需要 diff API
-    // 可以通过 repo.diff_tree_to_index / diff_index_to_workdir 获取详细 diff
-    // 此处为了性能和简洁，暂不实现（可后续优化）
-    let _ = (repo, file_path, staged);
-    (0, 0)
+/// 把 git 路径归一化为正斜杠分隔，统一统计表 key 与 status 条目路径（Windows 兼容）。
+fn normalize_path(p: &str) -> String {
+    p.replace('\\', "/")
+}
+
+/// 一次性计算仓库内所有变更文件的真实增删行数（相对 HEAD，合并暂存区+工作区+未跟踪）。
+///
+/// 单次 `diff_tree_to_workdir_with_index` + `foreach` 累加，避免逐文件多次 diff 的 N 次扫描。
+/// 二进制文件不进入 line callback，自然为 (0, 0)。失败时降级为空表（统计显示 0，不影响列表）。
+///
+/// # Returns
+/// 路径（正斜杠归一化）→ (新增行数, 删除行数)
+fn compute_diff_line_stats(repo: &Repository) -> std::collections::HashMap<String, (i32, i32)> {
+    use std::collections::HashMap;
+
+    let mut map: HashMap<String, (i32, i32)> = HashMap::new();
+
+    let mut opts = git2::DiffOptions::new();
+    opts.include_untracked(true);
+    opts.recurse_untracked_dirs(true);
+    opts.context_lines(0); // 统计只关心 +/- 行，无需上下文
+
+    // HEAD tree 可能不存在（空仓库 / unborn 分支）：此时与 None tree 比较，全部视为新增。
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+
+    let diff = match repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts)) {
+        Ok(d) => d,
+        Err(e) => {
+            log::warn!("[git_get_changes] 构造 diff 失败，行数统计降级为 0: {e}");
+            return map;
+        }
+    };
+
+    let mut file_cb = |_delta: git2::DiffDelta, _progress: f32| true;
+    let mut line_cb =
+        |delta: git2::DiffDelta, _hunk: Option<git2::DiffHunk>, line: git2::DiffLine| {
+            // 删除文件 new_file 可能无路径，回退到 old_file。
+            let path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(|p| normalize_path(&p.to_string_lossy()));
+            if let Some(path) = path {
+                let entry = map.entry(path).or_insert((0, 0));
+                // 仅统计真实增删行；上下文 ' '、EOFNL 标记 '>'/'<'/'='、头部 'F'/'H' 忽略。
+                match line.origin() {
+                    '+' => entry.0 += 1,
+                    '-' => entry.1 += 1,
+                    _ => {}
+                }
+            }
+            true
+        };
+
+    if let Err(e) = diff.foreach(&mut file_cb, None, None, Some(&mut line_cb)) {
+        log::warn!("[git_get_changes] 遍历 diff 失败，部分行数可能缺失: {e}");
+    }
+
+    map
 }
 
 /// 获取指定文件的 Git diff 内容
@@ -720,6 +778,22 @@ pub async fn git_revert_lines(
     tokio::task::spawn_blocking(move || apply_patch_to_workdir(&project_path, &reverse_patch))
         .await
         .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 开始监听项目目录文件变化（fs-watcher）。失败返回错误，前端据此降级为慢轮询。
+#[tauri::command]
+pub async fn git_watch_start(
+    app_handle: AppHandle,
+    bridge: State<'_, GitWatcherBridge>,
+    project_path: String,
+) -> Result<(), String> {
+    bridge.start(app_handle, project_path)
+}
+
+/// 停止文件监听并释放 watcher。
+#[tauri::command]
+pub async fn git_watch_stop(bridge: State<'_, GitWatcherBridge>) -> Result<(), String> {
+    bridge.stop()
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@
 
 mod claude_hook;
 mod commands;
+mod git_watcher;
 mod pty;
 mod shell_resolver;
 mod sync;
@@ -288,6 +289,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(pty::manager::PtyManager::new())
+        .manage(git_watcher::GitWatcherBridge::new())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(
             SqlBuilder::default()
@@ -345,6 +347,8 @@ pub fn run() {
             commands::git::git_discard_file,
             commands::git::git_revert_hunk,
             commands::git::git_revert_lines,
+            commands::git::git_watch_start,
+            commands::git::git_watch_stop,
             commands::model_pricing::model_prices_set_cache,
             commands::model_pricing::model_prices_sync,
         ])

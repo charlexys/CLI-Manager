@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { RefreshCw, GitBranch, Undo2, Files, FilePen, FilePlus, FileMinus } from "lucide-react";
 import { useGitStore } from "../../stores/gitStore";
 import { GitChangesTree } from "./GitChangesTree";
@@ -15,8 +17,8 @@ interface GitChangesPanelProps {
   embedded?: boolean;
 }
 
-// 聚焦轮询间隔：仅在窗口聚焦且面板可见时静默刷新，避免无谓查询。
-const POLL_INTERVAL_MS = 4000;
+// 降级慢轮询间隔：仅当 fs-watcher 初始化失败（网络盘/WSL 等 notify 不可用）时启用。
+const FALLBACK_POLL_INTERVAL_MS = 15000;
 
 function collectDirectoryPaths(nodes: GitTreeNode[]): string[] {
   const paths: string[] = [];
@@ -63,44 +65,61 @@ export function GitChangesPanel({ open, projectPath, visible = true, embedded = 
     }
   }, [panelActive, open, projectPath, fetchChanges, reset]);
 
-  // 自动刷新：窗口聚焦且面板可见时每 ~4s 静默刷新；失焦/隐藏暂停。
+  // fs-watcher 驱动刷新：后端监听项目目录，命中当前项目且窗口活跃时静默刷新。
+  // 替代旧的固定轮询；watcher 初始化失败时降级为慢轮询。失焦/隐藏不刷新，重新聚焦立即刷新一次。
   useEffect(() => {
     if (!panelActive || !projectPath) return;
 
-    let timer: number | undefined;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    let fallbackTimer: number | undefined;
+
     const isActive = () => document.visibilityState === "visible" && document.hasFocus();
-    const tick = () => {
+    const refreshIfActive = () => {
       if (isActive()) void fetchChanges(projectPath, true);
     };
-    const start = () => {
-      if (timer === undefined) timer = window.setInterval(tick, POLL_INTERVAL_MS);
-    };
-    const stop = () => {
-      if (timer !== undefined) {
-        window.clearInterval(timer);
-        timer = undefined;
+    const startFallback = () => {
+      if (fallbackTimer === undefined) {
+        fallbackTimer = window.setInterval(refreshIfActive, FALLBACK_POLL_INTERVAL_MS);
       }
     };
-    // 重新聚焦/变可见时立即刷新一次再继续轮询。
-    const onFocus = () => {
-      void fetchChanges(projectPath, true);
-      start();
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") onFocus();
-      else stop();
+    const stopFallback = () => {
+      if (fallbackTimer !== undefined) {
+        window.clearInterval(fallbackTimer);
+        fallbackTimer = undefined;
+      }
     };
 
+    // 订阅后端文件变化事件；按 projectPath 过滤（多窗口天然隔离）。
+    void listen<{ projectPath: string }>("git-changed", (event) => {
+      if (disposed) return;
+      if (event.payload.projectPath === projectPath) refreshIfActive();
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+
+    // 启动 watcher；失败则降级为慢轮询。
+    void invoke("git_watch_start", { projectPath }).catch((err) => {
+      console.warn("[GitChangesPanel] git_watch_start 失败，降级慢轮询:", err);
+      if (!disposed) startFallback();
+    });
+
+    // 重新聚焦/变可见时立即刷新一次（事件可能在失焦期间被忽略）。
+    const onFocus = () => refreshIfActive();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refreshIfActive();
+    };
     window.addEventListener("focus", onFocus);
-    window.addEventListener("blur", stop);
     document.addEventListener("visibilitychange", onVisibility);
-    if (isActive()) start();
 
     return () => {
-      stop();
+      disposed = true;
+      stopFallback();
+      if (unlisten) unlisten();
       window.removeEventListener("focus", onFocus);
-      window.removeEventListener("blur", stop);
       document.removeEventListener("visibilitychange", onVisibility);
+      void invoke("git_watch_stop").catch(() => {});
     };
   }, [panelActive, projectPath, fetchChanges]);
 
@@ -135,6 +154,9 @@ export function GitChangesPanel({ open, projectPath, visible = true, embedded = 
   const deletedCount = changes.filter((c) => c.status === "D").length;
   // 可回滚（已跟踪）文件数：排除未跟踪 U/??。
   const trackableCount = changes.filter((c) => c.status !== "U" && c.status !== "??").length;
+  // 总增删行数聚合（真实 diff 行数，后端 git_get_changes 提供）。
+  const totalAdded = changes.reduce((sum, c) => sum + (c.added || 0), 0);
+  const totalDeleted = changes.reduce((sum, c) => sum + (c.deleted || 0), 0);
 
   const filterButtons = [
     { label: "全部", value: "all" as const, count: allCount, color: TERM.fg, icon: Files },
@@ -245,6 +267,14 @@ export function GitChangesPanel({ open, projectPath, visible = true, embedded = 
             <>
               {" · "}
               <span style={{ color: STATUS_CONFIG.D.color }}>{deletedCount}</span> 删除
+            </>
+          )}
+          {(totalAdded > 0 || totalDeleted > 0) && (
+            <>
+              {" · "}
+              {totalAdded > 0 && <span style={{ color: TERM.green }}>+{totalAdded}</span>}
+              {totalAdded > 0 && totalDeleted > 0 && " "}
+              {totalDeleted > 0 && <span style={{ color: TERM.red }}>-{totalDeleted}</span>}
             </>
           )}
         </div>

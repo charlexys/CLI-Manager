@@ -153,7 +153,6 @@ interface Settings {
   terminalThemeMode: TerminalThemeMode;
   terminalThemeName: string;
   sidebarDensity: SidebarDensity;
-  showProjectTreeBadges: boolean;
   viewMode: ViewMode;
   closeBehavior: CloseBehavior;
   keyboardShortcuts: KeyboardShortcutMap;
@@ -179,6 +178,8 @@ interface Settings {
   /** Git 变更树分组模式：directory（按目录树） / module（按顶层目录模块） */
   gitGroupBy: "directory" | "module";
   confirmBeforeClosingTerminalTab: boolean;
+  /** 批量启动分组时，同一分组终端放在同一个 pane 中（多 tab），不同分组创建在不同 pane。默认关闭。 */
+  batchLaunchGroupInPane: boolean;
 }
 
 interface SettingsStore extends Settings {
@@ -214,7 +215,6 @@ const DEFAULTS: Settings = {
   terminalThemeMode: "follow-app",
   terminalThemeName: "auto",
   sidebarDensity: "comfortable",
-  showProjectTreeBadges: true,
   viewMode: "standard",
   closeBehavior: "ask",
   keyboardShortcuts: DEFAULT_KEYBOARD_SHORTCUTS,
@@ -264,6 +264,7 @@ const DEFAULTS: Settings = {
   ccSwitchDbPath: null,
   gitGroupBy: "directory",
   confirmBeforeClosingTerminalTab: false,
+  batchLaunchGroupInPane: false,
 };
 
 const LEGACY_LIGHT_PALETTE_MAP: Partial<Record<string, LightThemePalette>> = {
@@ -534,10 +535,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       typeof entries.terminalSidePanelMerged === "boolean"
         ? entries.terminalSidePanelMerged
         : DEFAULTS.terminalSidePanelMerged;
-    entries.showProjectTreeBadges =
-      typeof entries.showProjectTreeBadges === "boolean"
-        ? entries.showProjectTreeBadges
-        : DEFAULTS.showProjectTreeBadges;
     entries.terminalBackground = migrateTerminalBackground(entries.terminalBackground);
 
     // 默认 Shell：用户从未设置过时，根据操作系统选择合适的默认值
@@ -594,6 +591,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       typeof entries.confirmBeforeClosingTerminalTab === "boolean"
         ? entries.confirmBeforeClosingTerminalTab
         : DEFAULTS.confirmBeforeClosingTerminalTab;
+    entries.batchLaunchGroupInPane =
+      typeof entries.batchLaunchGroupInPane === "boolean"
+        ? entries.batchLaunchGroupInPane
+        : DEFAULTS.batchLaunchGroupInPane;
 
     // 检测背景图是否仍存在；若不存在，仅在内存中清空 imagePath，保留 settings.json
     // 中的原配置，便于后续提示用户「之前选的图丢了」。

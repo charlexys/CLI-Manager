@@ -20,6 +20,7 @@ import {
   reorderSessionInPane,
   resizePaneSplit,
   setPaneActiveSession,
+  splitPaneEmpty as splitPaneEmptyTree,
   splitPaneLeaf,
   splitExistingSessionToPaneEdge,
   unsplitPaneLeaf,
@@ -142,7 +143,7 @@ interface TerminalStore {
   splits: Record<string, SplitState>;
   hiddenBackgroundSessionIds: Set<string>;
   subagentTranscripts: Record<string, SubagentTranscriptContent>;
-  createSession: (projectId?: string, cwd?: string, title?: string, startupCmd?: string, envVars?: Record<string, string>, shell?: string) => Promise<string>;
+  createSession: (projectId?: string, cwd?: string, title?: string, startupCmd?: string, envVars?: Record<string, string>, shell?: string, paneId?: string) => Promise<string>;
   closeSession: (id: string) => Promise<void>;
   setActive: (id: string) => void;
   markAttentionInputHandled: (sessionId: string) => void;
@@ -153,6 +154,8 @@ interface TerminalStore {
   splitSessionToPaneEdge: (sessionId: string, targetPaneId: string, edge: TerminalPaneDropEdge) => void;
   renameSession: (id: string, title: string) => void;
   splitTerminal: (sessionId: string, direction: TerminalPaneSplitDirection, options?: SplitTerminalOptions) => Promise<string | null>;
+  /** Split the current pane into two, creating a new empty leaf (no sessions). Used by batch launch to create panes for different root groups. */
+  splitPaneEmpty: (paneId: string, direction: TerminalPaneSplitDirection) => void;
   unsplitTerminal: (sessionId: string) => Promise<void>;
   setSplitRatio: (splitId: string, ratio: number) => void;
   getNextSessionIdForShortcut: (delta: 1 | -1) => string | null;
@@ -610,7 +613,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   hiddenBackgroundSessionIds: new Set<string>(),
   subagentTranscripts: {},
 
-  createSession: async (projectId, cwd, title, startupCmd, envVars, shell) => {
+  createSession: async (projectId, cwd, title, startupCmd, envVars, shell, paneId) => {
     const normalizedInputShell = normalizeShellKey(shell);
     const normalizedDefaultShell = normalizeShellKey(useSettingsStore.getState().defaultShell);
     const resolvedShell =
@@ -654,7 +657,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
 
     const newSessions = [...get().sessions, session];
-    const paneResult = addSessionToPaneTree(get().paneTree, get().activePaneId, sessionId, createPaneId);
+    const paneResult = addSessionToPaneTree(get().paneTree, paneId ?? get().activePaneId, sessionId, createPaneId);
     set({
       sessions: newSessions,
       activeSessionId: sessionId,
@@ -895,6 +898,13 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     if (!changed) return;
     set({ sessions: nextSessions });
     useSessionStore.getState().saveSessions(nextSessions).catch(() => {});
+  },
+
+  splitPaneEmpty: (paneId, direction) => {
+    const state = get();
+    if (!state.paneTree) return;
+    const result = splitPaneEmptyTree(state.paneTree, paneId, direction, createPaneId);
+    set({ paneTree: result.tree, activePaneId: result.activePaneId });
   },
 
   splitTerminal: async (sessionId, direction, options) => {

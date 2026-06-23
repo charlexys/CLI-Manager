@@ -562,9 +562,9 @@ export function Sidebar({ onOpenSettings, onOpenStats, compactMode = false }: Si
     );
   }, []);
 
-  const openProjectInternal = async (project: Project) => {
+  const openProjectInternal = async (project: Project, targetPaneId?: string) => {
     const options = buildProjectSplitOptions(project);
-    await createSession(options.projectId, options.cwd, options.title, options.startupCmd, options.envVars, options.shell);
+    await createSession(options.projectId, options.cwd, options.title, options.startupCmd, options.envVars, options.shell, targetPaneId);
   };
 
   const openProjects = async (items: Project[]) => {
@@ -731,7 +731,66 @@ export function Sidebar({ onOpenSettings, onOpenStats, compactMode = false }: Si
         (childMap.get(id) ?? []).forEach((child) => walk(child.id));
       };
       walk(groupId);
-      await openProjects(projects.filter((p) => p.group_id && groupIds.has(p.group_id)));
+      const matchedProjects = projects.filter((p) => p.group_id && groupIds.has(p.group_id));
+
+      const batchMode = useSettingsStore.getState().batchLaunchGroupInPane;
+      if (!batchMode) {
+        await openProjects(matchedProjects);
+        return;
+      }
+
+      // Batch mode: group projects by root group (top-level ancestor)
+      const groupById = new Map<string, Group>();
+      for (const group of groups) {
+        groupById.set(group.id, group);
+      }
+      const getRootGroupId = (gid: string): string => {
+        if (gid === groupId) return gid;
+        const group = groupById.get(gid);
+        if (!group) return gid;
+        // Stop when we reach a direct child of the starting group,
+        // or a group with no parent. This ensures each direct child
+        // of the starting group becomes its own "root" for pane splitting.
+        if (!group.parent_id || group.parent_id === groupId) return gid;
+        return getRootGroupId(group.parent_id);
+      };
+
+      const rootGroupProjects = new Map<string, Project[]>();
+      for (const project of matchedProjects) {
+        if (!project.group_id) continue;
+        const rootId = getRootGroupId(project.group_id);
+        const arr = rootGroupProjects.get(rootId) ?? [];
+        arr.push(project);
+        rootGroupProjects.set(rootId, arr);
+      }
+
+      let isFirstRootGroup = true;
+      for (const [, groupProjects] of rootGroupProjects) {
+        if (groupProjects.length === 0) continue;
+
+        if (isFirstRootGroup) {
+          // First root group: normal launch (creates or reuses active pane)
+          await openProjectInternal(groupProjects[0]);
+          isFirstRootGroup = false;
+        } else {
+          // Subsequent root groups: split current pane to create new empty pane,
+          // then launch the first project into that new pane
+          const currentPaneId = useTerminalStore.getState().activePaneId;
+          if (currentPaneId) {
+            useTerminalStore.getState().splitPaneEmpty(currentPaneId, "vertical");
+            const newPaneId = useTerminalStore.getState().activePaneId;
+            await openProjectInternal(groupProjects[0], newPaneId ?? undefined);
+          } else {
+            await openProjectInternal(groupProjects[0]);
+          }
+        }
+
+        const firstPaneId = useTerminalStore.getState().activePaneId;
+        // Subsequent projects: launch in the same pane (multi-tab)
+        for (let i = 1; i < groupProjects.length; i++) {
+          await openProjectInternal(groupProjects[i], firstPaneId ?? undefined);
+        }
+      }
     },
     // 依赖只列函数体真正读取的值，避免无关 selector 变化引起整树重建。
     [groups, projects]  // eslint-disable-line react-hooks/exhaustive-deps

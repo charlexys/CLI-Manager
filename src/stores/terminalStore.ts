@@ -123,6 +123,7 @@ interface HookToolStatus {
 interface HookSettingsStatusPayload {
   claude: HookToolStatus;
   codex: HookToolStatus;
+  claudeAutoRepaired?: boolean;
 }
 
 interface PtyStatusPayload {
@@ -581,6 +582,8 @@ async function shouldEnableHookEnv(): Promise<boolean> {
     const status = await invoke<HookSettingsStatusPayload>("hook_settings_get_status", {
       selectedDir: settings.claudeHookConfigDir?.trim() || null,
       codexSelectedDir: settings.codexHookConfigDir?.trim() || null,
+      ccSwitchDbPath: settings.ccSwitchDbPath ?? undefined,
+      autoRepair: settings.claudeHookAutoRepairKnownInstalled,
     });
     return status.claude.status === "installed" || status.codex.status === "installed";
   } catch (err) {

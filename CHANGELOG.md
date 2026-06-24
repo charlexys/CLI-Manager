@@ -2,6 +2,13 @@
 
 ## [V1.1.9] - 2026-06-24
 
+### cc-switch Hook 防覆盖保护
+
+- **新增 cc-switch 通用配置保护**：Claude/Codex Hook 安装、卸载与状态检测会同步 cc-switch 数据库中的通用配置片段，避免切换供应商时被重写导致 Hook 丢失；支持用户在「设置 -> 供应商」选择自定义 `cc-switch.db` 路径，未配置时使用平台默认 `~/.cc-switch/cc-switch.db`。
+- **区分 Claude JSON 与 Codex TOML**：`common_config_claude` 按 JSON 合并 CLI-Manager Hook 命令，`common_config_codex` 按 TOML 仅启用 `[features].hooks = true`，Codex 具体 Hook 命令继续保存在 `hooks.json`，不再误报 Codex 通用配置不是 JSON。
+- **Hook 设置页状态反馈**：在系统通知设置上方新增单一 cc-switch 保护状态卡片，展示同步、未检测到、路径无效、WSL 环境不匹配等结果；安装完成后返回重新检测状态，避免写入成功后 UI 仍显示未检测到。
+- **Claude Hook 自动修复**：记录用户已安装过 Claude Hook 后，启动/刷新状态时可检测外部覆盖并自动恢复 CLI-Manager 全局 Hook，只显示一次系统内提示。
+
 ### 删除项目树徽章
 
 - **移除项目树徽章功能**：从通用设置中删除「项目树徽章」开关及关联逻辑。项目树不再显示供应商徽标、路径异常警告和分组数量标记，简化侧边栏视觉。([#47](https://github.com/dark-hxx/CLI-Manager/issues/47))

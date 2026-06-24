@@ -147,3 +147,123 @@ showClaudeHookToast(payload, tabId);
 showClaudeHookToast(payload, tabId);
 void sendSystemNotification(payload, tabTitle);
 ```
+
+## Scenario: CLI Hook Protection Through cc-switch Common Config
+
+### 1. Scope / Trigger
+
+- Trigger: Claude/Codex Hook install/status/uninstall must survive external cc-switch provider switches that rewrite CLI settings.
+- Applies to: `src-tauri/src/commands/hook_settings.rs`, frontend Hook settings/status callers, persisted `ccSwitchDbPath`, and cc-switch SQLite `settings.common_config_claude` / `settings.common_config_codex`.
+- This scenario is global/user-level only. Do not implement project-local `.claude/settings.local.json` or Claude managed settings from this path.
+
+### 2. Signatures
+
+```rust
+pub async fn hook_settings_get_status(
+    app: AppHandle,
+    selected_dir: Option<String>,
+    codex_selected_dir: Option<String>,
+    cc_switch_db_path: Option<String>,
+    auto_repair: Option<bool>,
+) -> Result<HookSettingsStatus, String>
+
+pub async fn hook_settings_install(
+    app: AppHandle,
+    selected_dir: Option<String>,
+    codex_selected_dir: Option<String>,
+    cc_switch_db_path: Option<String>,
+) -> Result<HookSettingsStatus, String>
+
+pub async fn hook_settings_uninstall(
+    app: AppHandle,
+    selected_dir: Option<String>,
+    codex_selected_dir: Option<String>,
+    cc_switch_db_path: Option<String>,
+) -> Result<HookSettingsStatus, String>
+
+pub async fn hook_settings_install_codex(
+    app: AppHandle,
+    selected_dir: Option<String>,
+    codex_selected_dir: Option<String>,
+    cc_switch_db_path: Option<String>,
+) -> Result<HookSettingsStatus, String>
+
+pub async fn hook_settings_uninstall_codex(
+    app: AppHandle,
+    selected_dir: Option<String>,
+    codex_selected_dir: Option<String>,
+    cc_switch_db_path: Option<String>,
+) -> Result<HookSettingsStatus, String>
+```
+
+```ts
+interface HookSettingsStatus {
+  claude: ToolHookSettingsStatus;
+  codex: ToolHookSettingsStatus;
+  ccSwitch: {
+    state: "notDetected" | "notSynced" | "synced" | "invalidDb" | "unavailable" | "syncFailed";
+    dbPath: string | null;
+    message: string | null;
+    wslMismatch: boolean;
+  };
+  claudeAutoRepaired: boolean;
+}
+```
+
+### 3. Contracts
+
+- Frontend must pass `ccSwitchDbPath: settings.ccSwitchDbPath ?? undefined`; `null`/missing means platform default `~/.cc-switch/cc-switch.db`.
+- Backend must reuse the cc-switch DB resolver: explicit custom paths are validated and never silently replaced by defaults.
+- Installing Claude Hook writes normal Claude `settings.json` hooks first, then best-effort merges the same CLI-Manager-owned hook commands into `settings.common_config_claude`.
+- Installing Codex Hook writes normal Codex `hooks.json` commands and `config.toml` feature flags first, then best-effort merges the TOML `[features].hooks = true` flag into `settings.common_config_codex`. Codex hook commands remain in `hooks.json`; `common_config_codex` is not JSON.
+- Hook settings UI shows the cc-switch protection card once, above system notification settings. Do not duplicate it in both Claude and Codex sections.
+- Claude common-config merge may remove/replace only CLI-Manager-owned hook commands (`__hook` marker or known legacy scripts); it must preserve non-hook fields and non-CLI-Manager hook entries. Codex common-config merge may only add or replace the TOML `features.hooks` flag and must preserve other TOML fields.
+- Common-config writes use `sqlx` and an explicit transaction. Do not add `rusqlite`.
+- If cc-switch is missing or common-config sync fails, Hook installation still succeeds and the returned `ccSwitch.state` explains the protection status.
+- WSL config paths must not be paired with a host cc-switch DB silently; return `unavailable` with `wslMismatch: true`.
+- `autoRepair: true` means "the user previously installed Claude Hook"; if CLI-Manager-owned hooks are missing or partial, backend may reinstall them and return `claudeAutoRepaired: true`.
+
+### 4. Validation & Error Matrix
+
+| Condition | `ccSwitch.state` / behavior |
+|-----------|-----------------------------|
+| Default DB path missing | `notDetected`; Hook install/status succeeds |
+| Explicit DB path missing or not `.db` | `invalidDb`; do not fallback to default |
+| WSL CLI config dir + host DB path | `unavailable`, `wslMismatch: true` |
+| Missing `settings` table | `unavailable`; Hook install succeeds |
+| Invalid `common_config_claude` JSON | `syncFailed`, message `common_config_parse_failed`; do not overwrite |
+| Existing `common_config_codex` TOML | preserve existing TOML fields and set `[features].hooks = true`; do not parse as JSON |
+| SQLite open/query/write failure | `syncFailed` with stable `db_*`/`db_write_failed` message |
+| Existing non-CLI-Manager hooks | preserved on install, reinstall, and uninstall |
+
+### 5. Good/Base/Bad Cases
+
+- Good: User selected a moved cc-switch DB in Settings -> Provider; Hook install syncs the relevant `common_config_<tool>` key at that exact path and returns `synced`.
+- Base: cc-switch is not installed; Hook install still writes normal CLI settings and returns `notDetected`.
+- Base: user previously installed Hook, cc-switch rewrites `settings.json`, and startup calls status with `autoRepair: true`; backend restores missing hooks and frontend shows one lightweight notice.
+- Bad: invalid explicit DB path falls back to `%USERPROFILE%/.cc-switch/cc-switch.db`; this can write the wrong database and is forbidden.
+- Bad: merging common config replaces provider env, MCP, permissions, or third-party hooks; only CLI-Manager hook entries are owned here.
+
+### 6. Tests Required
+
+- Rust unit tests for Claude common-config merge preserving existing fields and non-CLI-Manager hooks, and Codex TOML common-config preserving existing fields while enabling `[features].hooks`.
+- Rust unit tests for strip/uninstall preserving non-CLI-Manager hooks.
+- Rust regression test that Claude common-config status requires every installed event, including Claude `Notification`; Codex common-config status requires `[features].hooks = true`.
+- Rust unit test that invalid Claude common-config JSON returns `common_config_parse_failed`.
+- TypeScript type-check after adding payload fields or new frontend status states.
+- Manual smoke points: no cc-switch DB, default DB present, custom selected DB, invalid selected DB, and WSL Claude config mismatch.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// Do not hard-code a local Windows user path or silently fallback from an invalid explicit DB.
+let db = PathBuf::from(r"C:\Users\Admini\.cc-switch\cc-switch.db");
+```
+
+#### Correct
+
+```rust
+let path = resolve_ccswitch_db_path_for_hook(&app, cc_switch_db_path, &claude_dir)?;
+```

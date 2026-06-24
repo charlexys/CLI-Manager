@@ -6,7 +6,7 @@ import { useTerminalStore, type SessionStatus, type SplitTerminalOptions } from 
 import { useHistoryStore } from "../../stores/historyStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import type { TerminalPaneSplitDirection } from "../../stores/terminalPaneTree";
-import type { Project, TreeNode as TNode, Group } from "../../lib/types";
+import type { HistorySourceFilter, Project, TreeNode as TNode, Group } from "../../lib/types";
 import { ConfigModal } from "../ConfigModal";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ProviderSwitchModal } from "../ProviderSwitchModal";
@@ -25,6 +25,7 @@ import {
   Copy,
   FolderOpen,
   FolderPlus,
+  ListClockIcon,
   Pencil,
   Play,
   Plus,
@@ -55,6 +56,14 @@ function clampExpandedSidebarWidth(width: number): number {
 function normalizePersistedSidebarWidth(width: number): number {
   if (width <= SIDEBAR_COLLAPSED_WIDTH) return SIDEBAR_COLLAPSED_WIDTH;
   return clampExpandedSidebarWidth(width === 280 ? 248 : width);
+}
+
+function resolveHistorySourceFilter(cliTool: string | null | undefined): HistorySourceFilter {
+  const normalized = cliTool?.trim().toLowerCase();
+  if (!normalized) return "all";
+  if (normalized.includes("claude")) return "claude";
+  if (normalized.includes("codex") || normalized === "code") return "codex";
+  return "all";
 }
 
 function buildProjectSplitOptions(project: Project): SplitTerminalOptions {
@@ -113,6 +122,8 @@ export function Sidebar({ onOpenSettings, onOpenStats, compactMode = false }: Si
   const updateSetting = useSettingsStore((s) => s.update);
   const persistedSidebarWidth = useSettingsStore((s) => s.sidebarWidth);
   const closeHistory = useHistoryStore((s) => s.closeHistory);
+  const openHistory = useHistoryStore((s) => s.openHistory);
+  const triggerGlobalSearchFocus = useHistoryStore((s) => s.triggerGlobalSearchFocus);
 
   const initialSidebarWidth = normalizePersistedSidebarWidth(persistedSidebarWidth);
   const [sidebarWidth, setSidebarWidth] = useState(initialSidebarWidth);
@@ -612,6 +623,19 @@ export function Sidebar({ onOpenSettings, onOpenStats, compactMode = false }: Si
     }
   }, []);
 
+  const handleOpenProjectHistory = useCallback(
+    (project: Project) => {
+      void openHistory({
+        sourceFilter: resolveHistorySourceFilter(project.cli_tool),
+        projectPath: project.path,
+      }).then(() => {
+        triggerGlobalSearchFocus();
+      }).catch((err) => {
+        toast.error("打开会话历史失败", { description: String(err) });
+      });
+    },
+    [openHistory, triggerGlobalSearchFocus]
+  );
   const handleRequestDeleteProject = useCallback((project: Project) => {
     setConfirmAction({ kind: "delete-project", project });
   }, []);
@@ -1021,6 +1045,17 @@ export function Sidebar({ onOpenSettings, onOpenStats, compactMode = false }: Si
                 >
                   <FolderOpen size={14} strokeWidth={1.5} />
                   打开所在目录
+                </button>
+                <button
+                  className="context-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    handleOpenProjectHistory(contextMenu.project);
+                    setContextMenu(null);
+                  }}
+                >
+                  <ListClockIcon size={14} />
+                  会话历史
                 </button>
                 {contextMenu.project.cli_tool.toLowerCase().includes("claude") && (
                   <button

@@ -121,6 +121,49 @@ function countProjects(node: HistoryProjectTreeNode): number {
   return node.children.reduce((sum, child) => sum + countProjects(child), 0);
 }
 
+function collectGroupIds(nodes: HistoryProjectTreeNode[], out: string[] = []): string[] {
+  for (const node of nodes) {
+    if (node.type !== "group") continue;
+    out.push(node.group.id);
+    collectGroupIds(node.children, out);
+  }
+  return out;
+}
+
+function normalizeProjectSearch(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function projectMatchesSearch(project: Project, query: string): boolean {
+  if (!query) return true;
+  return (
+    project.name.toLowerCase().includes(query) ||
+    project.path.toLowerCase().includes(query) ||
+    project.cli_tool.toLowerCase().includes(query)
+  );
+}
+
+function filterHistoryProjectTree(nodes: HistoryProjectTreeNode[], query: string): HistoryProjectTreeNode[] {
+  if (!query) return nodes;
+
+  const result: HistoryProjectTreeNode[] = [];
+  for (const node of nodes) {
+    if (node.type === "project") {
+      if (projectMatchesSearch(node.project, query)) result.push(node);
+      continue;
+    }
+
+    const groupMatches = node.group.name.toLowerCase().includes(query);
+    const children = groupMatches
+      ? node.children
+      : filterHistoryProjectTree(node.children, query);
+    if (groupMatches || children.length > 0) {
+      result.push({ ...node, children });
+    }
+  }
+  return result;
+}
+
 export function HistoryListPane({
   historySidebarWidth,
   sidebarRef,
@@ -159,10 +202,21 @@ export function HistoryListPane({
   const [contextMenu, setContextMenu] = useState<SessionContextMenu | null>(null);
   const [collapsedFilterGroups, setCollapsedFilterGroups] = useState<Set<string>>(new Set());
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [projectSearchQuery, setProjectSearchQuery] = useState("");
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const projectDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const projectTree = useMemo(() => buildHistoryProjectTree(groups, projects), [groups, projects]);
+  const projectGroupIds = useMemo(() => collectGroupIds(projectTree), [projectTree]);
+  const normalizedProjectSearch = useMemo(() => normalizeProjectSearch(projectSearchQuery), [projectSearchQuery]);
+  const filteredProjectTree = useMemo(
+    () => filterHistoryProjectTree(projectTree, normalizedProjectSearch),
+    [normalizedProjectSearch, projectTree]
+  );
+  const filteredProjectCount = useMemo(
+    () => filteredProjectTree.reduce((sum, node) => sum + countProjects(node), 0),
+    [filteredProjectTree]
+  );
   const selectedProjectName = useMemo(
     () => projects.find((project) => project.path === projectPathFilter)?.name ?? null,
     [projectPathFilter, projects]
@@ -244,6 +298,14 @@ export function HistoryListPane({
   }, [contextMenu]);
 
   useEffect(() => {
+    if (!projectMenuOpen) {
+      setProjectSearchQuery("");
+      return;
+    }
+    setCollapsedFilterGroups(new Set(projectGroupIds));
+  }, [projectGroupIds, projectMenuOpen]);
+
+  useEffect(() => {
     if (!projectMenuOpen) return;
     const handler = (e: MouseEvent) => {
       if (projectDropdownRef.current?.contains(e.target as Node)) return;
@@ -304,7 +366,7 @@ export function HistoryListPane({
   const renderProjectNode = (node: HistoryProjectTreeNode, depth = 0): ReactNode => {
     const paddingLeft = 8 + depth * 14;
     if (node.type === "group") {
-      const isOpen = !collapsedFilterGroups.has(node.group.id);
+      const isOpen = Boolean(normalizedProjectSearch) || !collapsedFilterGroups.has(node.group.id);
       return (
         <div key={`group:${node.group.id}`}>
           <button
@@ -428,6 +490,27 @@ export function HistoryListPane({
 
           {projectMenuOpen && (
             <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-xl border border-border/70 bg-surface-container-lowest p-1 shadow-lg">
+              <div className="ui-history-search-shell mb-1 gap-2 px-2 py-1.5 text-text-secondary">
+                <Search size={13} />
+                <input
+                  value={projectSearchQuery}
+                  onChange={(e) => setProjectSearchQuery(e.target.value)}
+                  aria-label="搜索项目来源"
+                  placeholder="输入项目名、路径或 CLI"
+                  className="flex-1 bg-transparent text-[12px] outline-none"
+                />
+                {projectSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setProjectSearchQuery("")}
+                    className="ui-flat-action inline-flex h-5 w-5 items-center justify-center rounded-md px-0 text-text-muted"
+                    aria-label="清空项目来源搜索"
+                    title="清空搜索"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
               <div className="ui-thin-scroll max-h-52 space-y-0.5 overflow-y-auto pr-1" role="tree" aria-label="历史项目过滤树">
                 <button
                   type="button"
@@ -439,10 +522,15 @@ export function HistoryListPane({
                   <span className="min-w-0 flex-1 truncate font-medium">全部项目</span>
                   <span className="ui-tree-count-badge rounded-full px-1.5 text-[10px] font-medium">{projects.length}</span>
                 </button>
-                {projectTree.length > 0 ? (
-                  projectTree.map((node) => renderProjectNode(node))
+                {filteredProjectTree.length > 0 ? (
+                  filteredProjectTree.map((node) => renderProjectNode(node))
                 ) : (
-                  <div className="px-2 py-1.5 text-[11px] text-text-muted">暂无项目</div>
+                  <div className="px-2 py-1.5 text-[11px] text-text-muted">
+                    {normalizedProjectSearch ? "未找到匹配项目" : "暂无项目"}
+                  </div>
+                )}
+                {normalizedProjectSearch && filteredProjectTree.length > 0 && (
+                  <div className="px-2 py-1 text-[10px] text-text-muted">匹配 {filteredProjectCount} 个项目</div>
                 )}
               </div>
             </div>

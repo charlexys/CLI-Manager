@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { ActionIcon, Badge, Box, Button, Card, Group, SimpleGrid, Stack, Switch, Text, TextInput } from "@mantine/core";
 import { Play, CheckCircle, HelpCircle, ChevronDown, ChevronUp, Folder, FileCode, Copy, Check, X, Activity, Bell, ShieldAlert, ToggleRight, AlertTriangle, BellOff, XCircle, Layers } from "lucide-react";
 import { useSettingsStore, type HookEventType } from "@/stores/settingsStore";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 
 type HookInstallStatus = "directoryMissing" | "notInstalled" | "partialInstalled" | "installed";
 
@@ -46,11 +47,11 @@ interface CcSwitchHookProtectionStatus {
   wslMismatch: boolean;
 }
 
-const STATUS_LABELS: Record<HookInstallStatus, string> = {
-  directoryMissing: "目录未选择",
-  notInstalled: "未安装",
-  partialInstalled: "部分安装",
-  installed: "已安装",
+const STATUS_LABELS: Record<HookInstallStatus, TranslationKey> = {
+  directoryMissing: "settings.hooks.status.directoryMissing",
+  notInstalled: "settings.hooks.status.notInstalled",
+  partialInstalled: "settings.hooks.status.partialInstalled",
+  installed: "settings.hooks.status.installed",
 };
 
 const STATUS_COLORS: Record<HookInstallStatus, string> = {
@@ -60,13 +61,13 @@ const STATUS_COLORS: Record<HookInstallStatus, string> = {
   installed: "green",
 };
 
-const CCSWITCH_STATE_LABELS: Record<CcSwitchHookProtectionState, string> = {
-  notDetected: "未检测到 cc-switch",
-  notSynced: "未同步",
-  synced: "已同步",
-  invalidDb: "数据库路径无效",
-  unavailable: "不可用",
-  syncFailed: "同步失败",
+const CCSWITCH_STATE_LABELS: Record<CcSwitchHookProtectionState, TranslationKey> = {
+  notDetected: "settings.hooks.cc.notDetected",
+  notSynced: "settings.hooks.cc.notSynced",
+  synced: "settings.hooks.cc.synced",
+  invalidDb: "settings.hooks.cc.invalidDb",
+  unavailable: "settings.hooks.cc.unavailable",
+  syncFailed: "settings.hooks.cc.syncFailed",
 };
 
 const CCSWITCH_STATE_COLORS: Record<CcSwitchHookProtectionState, string> = {
@@ -79,51 +80,55 @@ const CCSWITCH_STATE_COLORS: Record<CcSwitchHookProtectionState, string> = {
 };
 
 
-function formatPath(value: string | null): string {
-  return value && value.trim() ? value : "未选择";
+function formatPath(value: string | null, fallback: string): string {
+  return value && value.trim() ? value : fallback;
 }
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function formatCcSwitchMessage(message: string | null): string | null {
+function formatCcSwitchMessage(message: string | null, t: (key: TranslationKey) => string): string | null {
   if (!message) return null;
-  const messages: Record<string, string> = {
-    db_not_found: "设置中的 cc-switch 数据库不存在，请在「设置 -> 供应商」重新选择。",
-    unsupported_format: "cc-switch 数据库路径必须指向 .db 文件。",
-    wsl_environment_mismatch: "当前 Claude 配置在 WSL 内，cc-switch 数据库在宿主环境，未自动跨环境写入。",
-    common_config_parse_failed: "Claude 通用配置片段不是有效 JSON，未自动覆盖。",
+  const messages: Record<string, TranslationKey> = {
+    db_not_found: "settings.hooks.cc.dbNotFound",
+    unsupported_format: "settings.hooks.cc.unsupportedFormat",
+    wsl_environment_mismatch: "settings.hooks.cc.wslMismatch",
+    common_config_parse_failed: "settings.hooks.cc.commonParseFailed",
   };
-  return messages[message] ?? message;
+  return messages[message] ? t(messages[message]) : message;
 }
 
-function getCcSwitchProtectionDescription(status?: CcSwitchHookProtectionStatus | null): string {
-  if (!status) return "正在检测 cc-switch 通用配置保护状态。";
+function getCcSwitchProtectionDescription(
+  status: CcSwitchHookProtectionStatus | null | undefined,
+  t: (key: TranslationKey) => string
+): string {
+  if (!status) return t("settings.hooks.cc.detecting");
   switch (status.state) {
     case "synced":
-      return "已同步到 cc-switch 通用配置片段，切换供应商时会保留 CLI-Manager Hook。";
+      return t("settings.hooks.cc.syncedDescription");
     case "notSynced":
-      return "尚未同步到 cc-switch 通用配置片段，重新安装对应 Hook 可重试。";
+      return t("settings.hooks.cc.notSyncedDescription");
     case "notDetected":
-      return "未检测到 cc-switch 数据库，Hook 已按普通全局配置工作。";
+      return t("settings.hooks.cc.notDetectedDescription");
     case "invalidDb":
-      return "设置中的 cc-switch 数据库路径不可用，已停止自动写入以避免误写。";
+      return t("settings.hooks.cc.invalidDbDescription");
     case "unavailable":
       return status.wslMismatch
-        ? "检测到 WSL 环境不匹配，请在「设置 -> 供应商」选择同一环境内的 cc-switch.db。"
-        : "cc-switch 数据库暂不可用于通用配置同步。";
+        ? t("settings.hooks.cc.wslMismatchDescription")
+        : t("settings.hooks.cc.unavailableDescription");
     case "syncFailed":
-      return "cc-switch 通用配置同步失败，Hook 本身已安装，可稍后重试。";
+      return t("settings.hooks.cc.syncFailedDescription");
   }
 }
 
 function CcSwitchProtectionCard({ status }: { status?: CcSwitchHookProtectionStatus | null }) {
+  const { t } = useI18n();
   const state = status?.state ?? "notDetected";
   const isHealthy = state === "synced";
   const isWarning = state === "notSynced" || state === "unavailable";
   const Icon = isHealthy ? CheckCircle : isWarning || state === "notDetected" ? HelpCircle : AlertTriangle;
-  const formattedMessage = formatCcSwitchMessage(status?.message ?? null);
+  const formattedMessage = formatCcSwitchMessage(status?.message ?? null, t);
 
   return (
     <Card className="border border-border bg-surface-container-low" p="sm" radius="lg">
@@ -145,15 +150,15 @@ function CcSwitchProtectionCard({ status }: { status?: CcSwitchHookProtectionSta
             </Box>
             <Box className="min-w-0">
               <Text size="sm" fw={500} c="var(--on-surface)">
-                cc-switch 通用配置保护
+                {t("settings.hooks.cc.protection")}
               </Text>
               <Text mt={4} size="xs" c="var(--on-surface-variant)">
-                {getCcSwitchProtectionDescription(status)}
+                {getCcSwitchProtectionDescription(status, t)}
               </Text>
             </Box>
           </Group>
           <Badge variant="light" color={CCSWITCH_STATE_COLORS[state]} radius="xl" className="shrink-0">
-            {CCSWITCH_STATE_LABELS[state]}
+            {t(CCSWITCH_STATE_LABELS[state])}
           </Badge>
         </Group>
         {status?.dbPath && (
@@ -178,7 +183,8 @@ function CcSwitchProtectionCard({ status }: { status?: CcSwitchHookProtectionSta
 }
 
 function PathRow({ label, value }: { label: string; value: string | null }) {
-  const formatted = formatPath(value);
+  const { t } = useI18n();
+  const formatted = formatPath(value, t("settings.hooks.notSelected"));
   const hasValue = Boolean(value && value.trim());
   const [copied, setCopied] = useState(false);
 
@@ -194,7 +200,11 @@ function PathRow({ label, value }: { label: string; value: string | null }) {
   };
 
   const getIcon = () => {
-    if (label.includes('目录')) return <Folder size={16} />;
+    if (
+      label === t("settings.hooks.claudeConfigDir") ||
+      label === t("settings.hooks.codexConfigDir") ||
+      label === t("settings.hooks.hooksDir")
+    ) return <Folder size={16} />;
     if (label.includes('json') || label.includes('toml')) return <FileCode size={16} />;
     return <FileCode size={16} />;
   };
@@ -232,7 +242,7 @@ function PathRow({ label, value }: { label: string; value: string | null }) {
             size="compact-xs"
             onClick={handleCopy}
             className="shrink-0"
-            aria-label="复制路径"
+            aria-label={t("settings.hooks.copyPath")}
           >
             {copied ? <Check size={14} /> : <Copy size={14} />}
           </Button>
@@ -252,6 +262,7 @@ interface HookCardProps {
 }
 
 function HookCard({ icon, label, checked, notifyEnabled, onToggleNotify, notifyDisabled }: HookCardProps) {
+  const { t } = useI18n();
   return (
     <Card
       className="border transition-colors"
@@ -282,7 +293,7 @@ function HookCard({ icon, label, checked, notifyEnabled, onToggleNotify, notifyD
             radius="xl"
             size="xs"
           >
-            {checked ? "已安装" : "未安装"}
+            {checked ? t("settings.hooks.status.installed") : t("settings.hooks.status.notInstalled")}
           </Badge>
           {onToggleNotify && (
             <ActionIcon
@@ -292,7 +303,7 @@ function HookCard({ icon, label, checked, notifyEnabled, onToggleNotify, notifyD
               radius="xl"
               onClick={(e) => { e.stopPropagation(); onToggleNotify(); }}
               disabled={notifyDisabled}
-              aria-label={`${label} 系统通知`}
+              aria-label={t("settings.hooks.systemNotificationAria", { label })}
             >
               {notifyEnabled ? <Bell size={12} /> : <BellOff size={12} />}
             </ActionIcon>
@@ -304,9 +315,10 @@ function HookCard({ icon, label, checked, notifyEnabled, onToggleNotify, notifyD
 }
 
 function StatusPill({ status }: { status: HookInstallStatus }) {
+  const { t } = useI18n();
   return (
     <Badge variant="light" color={STATUS_COLORS[status]} radius="xl">
-      {STATUS_LABELS[status]}
+      {t(STATUS_LABELS[status])}
     </Badge>
   );
 }
@@ -376,6 +388,7 @@ function SettingsSwitchRow({
 }
 
 export function HookSettingsPage() {
+  const { t } = useI18n();
   const claudeHookConfigDir = useSettingsStore((s) => s.claudeHookConfigDir);
   const codexHookConfigDir = useSettingsStore((s) => s.codexHookConfigDir);
   const [status, setStatus] = useState<HookSettingsStatus | null>(null);
@@ -423,13 +436,13 @@ export function HookSettingsPage() {
         setCodexSelectedDir(nextStatus.codex.configDir);
       }
       if (nextStatus.claudeAutoRepaired && !claudeHookAutoRepairNoticeShown) {
-        toast.info("Claude Hook 已自动恢复", {
-          description: "检测到 Hook 被外部工具覆盖，已重新写入全局 Hook 配置。",
+        toast.info(t("settings.hooks.autoRepaired"), {
+          description: t("settings.hooks.autoRepairedDescription"),
         });
         await updateSetting("claudeHookAutoRepairNoticeShown", true);
       }
     } catch (error) {
-      toast.error("刷新 Hook 状态失败", { description: getErrorMessage(error) });
+      toast.error(t("settings.hooks.refreshFailed"), { description: getErrorMessage(error) });
     } finally {
       setLoading(false);
     }
@@ -442,28 +455,28 @@ export function HookSettingsPage() {
   const handleSelectDir = async () => {
     try {
       const dir = await invoke<string | null>("hook_settings_select_dir", {
-        title: "选择 Claude 配置目录",
+        title: t("settings.hooks.selectClaudeDir"),
       });
       if (!dir) return;
       setSelectedDir(dir);
       await updateSetting("claudeHookConfigDir", dir);
       await refreshStatus(dir, codexSelectedDirArg);
     } catch (error) {
-      toast.error("选择目录失败", { description: getErrorMessage(error) });
+      toast.error(t("settings.hooks.selectDirFailed"), { description: getErrorMessage(error) });
     }
   };
 
   const handleSelectCodexDir = async () => {
     try {
       const dir = await invoke<string | null>("hook_settings_select_dir", {
-        title: "选择 Codex 配置目录",
+        title: t("settings.hooks.selectCodexDir"),
       });
       if (!dir) return;
       setCodexSelectedDir(dir);
       await updateSetting("codexHookConfigDir", dir);
       await refreshStatus(selectedDirArg, dir);
     } catch (error) {
-      toast.error("选择 Codex 目录失败", { description: getErrorMessage(error) });
+      toast.error(t("settings.hooks.selectCodexDirFailed"), { description: getErrorMessage(error) });
     }
   };
 
@@ -495,11 +508,11 @@ export function HookSettingsPage() {
       if (nextStatus.claude.configDir) setSelectedDir(nextStatus.claude.configDir);
       await updateSetting("claudeHookAutoRepairKnownInstalled", true);
       await updateSetting("claudeHookAutoRepairNoticeShown", false);
-      toast.success("Claude Hook 已安装", {
-        description: getCcSwitchProtectionDescription(nextStatus.ccSwitch),
+      toast.success(t("settings.hooks.claudeInstalled"), {
+        description: getCcSwitchProtectionDescription(nextStatus.ccSwitch, t),
       });
     } catch (error) {
-      toast.error("安装 Claude Hook 失败", { description: getErrorMessage(error) });
+      toast.error(t("settings.hooks.claudeInstallFailed"), { description: getErrorMessage(error) });
     } finally {
       setClaudeWorking(false);
     }
@@ -517,9 +530,9 @@ export function HookSettingsPage() {
       if (nextStatus.claude.configDir) setSelectedDir(nextStatus.claude.configDir);
       await updateSetting("claudeHookAutoRepairKnownInstalled", false);
       await updateSetting("claudeHookAutoRepairNoticeShown", false);
-      toast.success("Claude Hook 已删除");
+      toast.success(t("settings.hooks.claudeDeleted"));
     } catch (error) {
-      toast.error("删除 Claude Hook 失败", { description: getErrorMessage(error) });
+      toast.error(t("settings.hooks.claudeDeleteFailed"), { description: getErrorMessage(error) });
     } finally {
       setClaudeWorking(false);
     }
@@ -535,11 +548,11 @@ export function HookSettingsPage() {
       });
       setStatus(nextStatus);
       if (nextStatus.codex.configDir) setCodexSelectedDir(nextStatus.codex.configDir);
-      toast.success("Codex Hook 已安装", {
-        description: getCcSwitchProtectionDescription(nextStatus.ccSwitch),
+      toast.success(t("settings.hooks.codexInstalled"), {
+        description: getCcSwitchProtectionDescription(nextStatus.ccSwitch, t),
       });
     } catch (error) {
-      toast.error("安装 Codex Hook 失败", { description: getErrorMessage(error) });
+      toast.error(t("settings.hooks.codexInstallFailed"), { description: getErrorMessage(error) });
     } finally {
       setCodexWorking(false);
     }
@@ -555,9 +568,9 @@ export function HookSettingsPage() {
       });
       setStatus(nextStatus);
       if (nextStatus.codex.configDir) setCodexSelectedDir(nextStatus.codex.configDir);
-      toast.success("Codex Hook 已删除");
+      toast.success(t("settings.hooks.codexDeleted"));
     } catch (error) {
-      toast.error("删除 Codex Hook 失败", { description: getErrorMessage(error) });
+      toast.error(t("settings.hooks.codexDeleteFailed"), { description: getErrorMessage(error) });
     } finally {
       setCodexWorking(false);
     }
@@ -608,21 +621,21 @@ export function HookSettingsPage() {
         <Stack gap="md">
           <Box>
             <Text size="sm" fw={600} c="var(--on-surface)">
-              Hook 通知弹框
+              {t("settings.hooks.popupSection")}
             </Text>
             <Text mt={4} size="xs" c="var(--on-surface-variant)">
-              控制 Claude Code 和 Codex CLI Hook 事件的右上角弹框；终端标签小圆点不受这里的弹框开关影响。
+              {t("settings.hooks.popupSectionDescription")}
             </Text>
           </Box>
           <SettingsSwitchRow
-            title="通知弹框"
-            description="关闭后不再弹出 Hook 通知卡片，只更新标签栏小圆点颜色。"
+            title={t("settings.hooks.popup")}
+            description={t("settings.hooks.popupDescription")}
             checked={hookPopupNotificationsEnabled}
             onCheckedChange={(checked) => void updateSetting("hookPopupNotificationsEnabled", checked)}
           />
           <SettingsSwitchRow
-            title="自动关闭弹框"
-            description="开启后 Hook 通知会在指定时间后自动消失。"
+            title={t("settings.hooks.autoClose")}
+            description={t("settings.hooks.autoCloseDescription")}
             checked={hookPopupAutoCloseEnabled}
             onCheckedChange={(checked) => void updateSetting("hookPopupAutoCloseEnabled", checked)}
           />
@@ -630,10 +643,10 @@ export function HookSettingsPage() {
             <Group justify="space-between" align="center" gap="md">
               <Box>
                 <Text size="sm" fw={500} c="var(--on-surface)">
-                  默认关闭时间
+                  {t("settings.hooks.defaultCloseTime")}
                 </Text>
                 <Text mt={4} size="xs" c="var(--text-muted)">
-                  单位：秒，默认 60 秒；仅在自动关闭开启时可编辑。
+                  {t("settings.hooks.defaultCloseTimeDescription")}
                 </Text>
               </Box>
               <Group gap="xs">
@@ -653,10 +666,10 @@ export function HookSettingsPage() {
                 }}
                 w={96}
                 size="xs"
-                aria-label="Hook 弹框默认关闭时间"
+                aria-label={t("settings.hooks.closeSecondsAria")}
               />
                 <Text size="xs" c="var(--on-surface-variant)">
-                  秒
+                  {t("settings.hooks.seconds")}
                 </Text>
               </Group>
             </Group>
@@ -675,10 +688,10 @@ export function HookSettingsPage() {
             />
             <Box>
               <Text size="sm" fw={500} c="var(--on-surface)">
-                系统通知
+                {t("settings.hooks.systemNotifications")}
               </Text>
               <Text size="xs" c="var(--on-surface-variant)">
-                每个 Hook 卡片下方可独立开关对应事件的系统通知（灰色铃铛=关闭，蓝色铃铛=开启）
+                {t("settings.hooks.systemNotificationsDescription")}
               </Text>
             </Box>
           </Group>
@@ -686,7 +699,7 @@ export function HookSettingsPage() {
             color="cliPrimary"
             checked={systemNotificationsEnabled}
             onChange={(event) => void updateSetting("systemNotificationsEnabled", event.currentTarget.checked)}
-            aria-label="启用系统通知"
+            aria-label={t("settings.hooks.enableSystemNotifications")}
           />
         </Group>
       </Card>
@@ -696,10 +709,10 @@ export function HookSettingsPage() {
           <Group justify="space-between" align="flex-start" gap="md">
             <Box>
               <Text size="sm" fw={600} c="var(--on-surface)">
-                Claude Code Hook 桥接
+                {t("settings.hooks.claudeBridge")}
               </Text>
               <Text mt={4} size="xs" c="var(--on-surface-variant)">
-                Claude Code 的运行中、待审批、完成和异常退出状态通过 Hook 上报；普通 shell 命令由通用 Shell 运行监控补充。
+                {t("settings.hooks.claudeBridgeDescription")}
               </Text>
             </Box>
             <StatusPill status={claudeStatus} />
@@ -708,7 +721,7 @@ export function HookSettingsPage() {
           <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="md">
             <HookCard
               icon={<Play />}
-              label="会话启动"
+              label={t("settings.hooks.event.sessionStart")}
               checked={claudeSessionStartInstalled}
               notifyEnabled={notifyState(["SessionStart"])}
               onToggleNotify={() => toggleNotifyEvents(["SessionStart"], !notifyState(["SessionStart"]))}
@@ -716,7 +729,7 @@ export function HookSettingsPage() {
             />
             <HookCard
               icon={<Activity />}
-              label="运行中"
+              label={t("settings.hooks.event.running")}
               checked={claudeRunningInstalled}
               notifyEnabled={notifyState(["UserPromptSubmit"])}
               onToggleNotify={() => toggleNotifyEvents(["UserPromptSubmit"], !notifyState(["UserPromptSubmit"]))}
@@ -724,7 +737,7 @@ export function HookSettingsPage() {
             />
             <HookCard
               icon={<Bell />}
-              label="待审批"
+              label={t("settings.hooks.event.attention")}
               checked={claudeAttentionInstalled}
               notifyEnabled={notifyState(["Notification"])}
               onToggleNotify={() => toggleNotifyEvents(["Notification"], !notifyState(["Notification"]))}
@@ -732,7 +745,7 @@ export function HookSettingsPage() {
             />
             <HookCard
               icon={<CheckCircle />}
-              label="任务完成"
+              label={t("settings.hooks.event.complete")}
               checked={claudeStopInstalled}
               notifyEnabled={notifyState(["Stop"])}
               onToggleNotify={() => toggleNotifyEvents(["Stop"], !notifyState(["Stop"]))}
@@ -740,7 +753,7 @@ export function HookSettingsPage() {
             />
             <HookCard
               icon={<XCircle size={26} />}
-              label="执行失败"
+              label={t("settings.hooks.event.failed")}
               checked={claudeFailureInstalled}
               notifyEnabled={notifyState(["StopFailure"])}
               onToggleNotify={() => toggleNotifyEvents(["StopFailure"], !notifyState(["StopFailure"]))}
@@ -748,7 +761,7 @@ export function HookSettingsPage() {
             />
             <HookCard
               icon={<Layers size={26} />}
-              label="子 Agent"
+              label={t("settings.hooks.event.subagent")}
               checked={claudeSubagentInstalled}
             />
           </SimpleGrid>
@@ -761,7 +774,7 @@ export function HookSettingsPage() {
               onClick={() => setClaudePathsOpen(!claudePathsOpen)}
               leftSection={claudePathsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             >
-              查看配置路径
+              {t("settings.hooks.viewPaths")}
             </Button>
             <Button
               variant="subtle"
@@ -770,15 +783,15 @@ export function HookSettingsPage() {
               onClick={() => setClaudeInfoOpen(!claudeInfoOpen)}
               leftSection={<HelpCircle size={14} />}
             >
-              安装说明
+              {t("settings.hooks.installGuide")}
             </Button>
           </Group>
 
           {claudePathsOpen && (
             <Card className="bg-surface-container-low/50" p="sm" radius="lg">
               <Stack gap="xs">
-                <PathRow label="Claude 配置目录" value={claude?.configDir ?? selectedDir} />
-                <PathRow label="hooks 目录" value={claude?.hooksDir ?? null} />
+                <PathRow label={t("settings.hooks.claudeConfigDir")} value={claude?.configDir ?? selectedDir} />
+                <PathRow label={t("settings.hooks.hooksDir")} value={claude?.hooksDir ?? null} />
                 <PathRow label="settings.json" value={claude?.configPath ?? null} />
               </Stack>
             </Card>
@@ -793,19 +806,19 @@ export function HookSettingsPage() {
                   </Box>
                   <Stack gap={4}>
                     <Text size="xs" fw={500} c="var(--on-surface)">
-                      安装内容
+                      {t("settings.hooks.installContent")}
                     </Text>
                     <Stack gap={2}>
                       <Group gap="xs">
                         <FileCode size={12} style={{ color: "var(--text-muted)" }} />
                         <Text size="xs" c="var(--on-surface-variant)" ff="var(--font-ui-mono)">
-                          settings.json 注册 __hook 命令
+                          {t("settings.hooks.registerSettingsHook")}
                         </Text>
                       </Group>
                       <Group gap="xs">
                         <FileCode size={12} style={{ color: "var(--text-muted)" }} />
                         <Text size="xs" c="var(--on-surface-variant)">
-                          指向本程序，跨平台无需脚本
+                          {t("settings.hooks.pointsToApp")}
                         </Text>
                       </Group>
                     </Stack>
@@ -818,14 +831,14 @@ export function HookSettingsPage() {
                   </Box>
                   <Stack gap={4}>
                     <Text size="xs" fw={500} c="var(--on-surface)">
-                      删除时保留
+                      {t("settings.hooks.keepOnDelete")}
                     </Text>
                     <Stack gap={2}>
                       <Text size="xs" c="var(--on-surface-variant)">
-                        • 用户自己的 hooks
+                        {t("settings.hooks.userHooks")}
                       </Text>
                       <Text size="xs" c="var(--on-surface-variant)">
-                        • 其它工具注册的 hook 命令
+                        {t("settings.hooks.otherHooks")}
                       </Text>
 
                     </Stack>
@@ -837,8 +850,8 @@ export function HookSettingsPage() {
 
           <TextInput
             size="xs"
-            label="Claude 配置目录（可手动粘贴，支持 WSL UNC）"
-            placeholder="\\wsl.localhost\Ubuntu-22.04\home\用户名\.claude"
+            label={t("settings.hooks.claudeDirInput")}
+            placeholder={t("settings.hooks.claudeDirPlaceholder")}
             value={selectedDir ?? ""}
             onChange={(e) => setSelectedDir(e.currentTarget.value || null)}
             onBlur={(e) => void handleManualClaudeDirCommit(e.currentTarget.value)}
@@ -850,16 +863,16 @@ export function HookSettingsPage() {
 
           <Group gap="xs">
             <Button variant="light" color="cliPrimary" size="xs" onClick={handleSelectDir} disabled={loading || claudeWorking || codexWorking}>
-              选择 Claude 目录
+              {t("settings.hooks.selectClaudeButton")}
             </Button>
             <Button color="cliPrimary" size="xs" onClick={handleClaudeInstall} disabled={loading || claudeWorking || claudeStatus === "directoryMissing"}>
-              {claudeWorking ? "处理中..." : "安装 Claude Hook"}
+              {claudeWorking ? t("settings.hooks.processing") : t("settings.hooks.installClaude")}
             </Button>
             <Button variant="light" color="red" size="xs" onClick={handleClaudeUninstall} disabled={loading || claudeWorking || claudeStatus === "directoryMissing"}>
-              删除 Claude Hook
+              {t("settings.hooks.deleteClaude")}
             </Button>
             <Button variant="default" color="gray" size="xs" onClick={() => void refreshStatus()} disabled={loading || claudeWorking || codexWorking}>
-              {loading ? "刷新中..." : "刷新状态"}
+              {loading ? t("settings.hooks.refreshing") : t("settings.hooks.refreshStatus")}
             </Button>
           </Group>
         </Stack>
@@ -870,10 +883,10 @@ export function HookSettingsPage() {
           <Group justify="space-between" align="flex-start" gap="md">
             <Box>
               <Text size="sm" fw={600} c="var(--on-surface)">
-                Codex CLI Hook 桥接
+                {t("settings.hooks.codexBridge")}
               </Text>
               <Text mt={4} size="xs" c="var(--on-surface-variant)">
-                Codex 的运行中、待审批和完成状态通过 Hook 上报；普通 shell 命令由通用 Shell 运行监控补充。
+                {t("settings.hooks.codexBridgeDescription")}
               </Text>
             </Box>
             <StatusPill status={codexStatus} />
@@ -882,7 +895,7 @@ export function HookSettingsPage() {
           <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="md">
             <HookCard
               icon={<Play />}
-              label="会话启动"
+              label={t("settings.hooks.event.sessionStart")}
               checked={codexSessionStartInstalled}
               notifyEnabled={notifyState(["SessionStart"])}
               onToggleNotify={() => toggleNotifyEvents(["SessionStart"], !notifyState(["SessionStart"]))}
@@ -890,7 +903,7 @@ export function HookSettingsPage() {
             />
             <HookCard
               icon={<Activity />}
-              label="运行中"
+              label={t("settings.hooks.event.running")}
               checked={codexRunningInstalled}
               notifyEnabled={notifyState(["UserPromptSubmit"])}
               onToggleNotify={() => toggleNotifyEvents(["UserPromptSubmit"], !notifyState(["UserPromptSubmit"]))}
@@ -898,7 +911,7 @@ export function HookSettingsPage() {
             />
             <HookCard
               icon={<ShieldAlert />}
-              label="需要审批"
+              label={t("settings.hooks.event.needsApproval")}
               checked={codexAttentionInstalled}
               notifyEnabled={notifyState(["PermissionRequest"])}
               onToggleNotify={() => toggleNotifyEvents(["PermissionRequest"], !notifyState(["PermissionRequest"]))}
@@ -906,7 +919,7 @@ export function HookSettingsPage() {
             />
             <HookCard
               icon={<CheckCircle />}
-              label="完成"
+              label={t("settings.hooks.event.done")}
               checked={codexStopInstalled}
               notifyEnabled={notifyState(["Stop"])}
               onToggleNotify={() => toggleNotifyEvents(["Stop"], !notifyState(["Stop"]))}
@@ -914,12 +927,12 @@ export function HookSettingsPage() {
             />
             <HookCard
               icon={<Layers size={26} />}
-              label="子 Agent"
+              label={t("settings.hooks.event.subagent")}
               checked={codexSubagentInstalled}
             />
             <HookCard
               icon={<ToggleRight />}
-              label="Hooks 功能"
+              label={t("settings.hooks.event.hooksFeature")}
               checked={Boolean(codex?.hooksFeatureInstalled)}
             />
           </SimpleGrid>
@@ -932,7 +945,7 @@ export function HookSettingsPage() {
               onClick={() => setCodexPathsOpen(!codexPathsOpen)}
               leftSection={codexPathsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             >
-              查看配置路径
+              {t("settings.hooks.viewPaths")}
             </Button>
             <Button
               variant="subtle"
@@ -941,15 +954,15 @@ export function HookSettingsPage() {
               onClick={() => setCodexInfoOpen(!codexInfoOpen)}
               leftSection={<HelpCircle size={14} />}
             >
-              安装说明
+              {t("settings.hooks.installGuide")}
             </Button>
           </Group>
 
           {codexPathsOpen && (
             <Card className="bg-surface-container-low/50" p="sm" radius="lg">
               <Stack gap="xs">
-                <PathRow label="Codex 配置目录" value={codex?.configDir ?? codexSelectedDir} />
-                <PathRow label="hooks 目录" value={codex?.hooksDir ?? null} />
+                <PathRow label={t("settings.hooks.codexConfigDir")} value={codex?.configDir ?? codexSelectedDir} />
+                <PathRow label={t("settings.hooks.hooksDir")} value={codex?.hooksDir ?? null} />
                 <PathRow label="hooks.json" value={codex?.configPath ?? null} />
                 <PathRow label="config.toml" value={codex?.featureConfigPath ?? null} />
               </Stack>
@@ -965,25 +978,25 @@ export function HookSettingsPage() {
                   </Box>
                   <Stack gap={4}>
                     <Text size="xs" fw={500} c="var(--on-surface)">
-                      安装内容
+                      {t("settings.hooks.installContent")}
                     </Text>
                     <Stack gap={2}>
                       <Group gap="xs">
                         <FileCode size={12} style={{ color: "var(--text-muted)" }} />
                         <Text size="xs" c="var(--on-surface-variant)" ff="var(--font-ui-mono)">
-                          hooks.json 注册 __hook 命令
+                          {t("settings.hooks.registerHooksJson")}
                         </Text>
                       </Group>
                       <Group gap="xs">
                         <FileCode size={12} style={{ color: "var(--text-muted)" }} />
                         <Text size="xs" c="var(--on-surface-variant)">
-                          指向本程序，跨平台无需脚本
+                          {t("settings.hooks.pointsToApp")}
                         </Text>
                       </Group>
                       <Group gap="xs">
                         <FileCode size={12} style={{ color: "var(--text-muted)" }} />
                         <Text size="xs" c="var(--on-surface-variant)">
-                          config.toml 中开启 <span className="font-mono">[features].hooks = true</span>
+                          {t("settings.hooks.enableCodexHooks")}
                         </Text>
                       </Group>
                     </Stack>
@@ -996,14 +1009,14 @@ export function HookSettingsPage() {
                   </Box>
                   <Stack gap={4}>
                     <Text size="xs" fw={500} c="var(--on-surface)">
-                      注意事项
+                      {t("settings.hooks.codexNotes")}
                     </Text>
                     <Stack gap={2}>
                       <Text size="xs" c="var(--on-surface-variant)">
-                        • 不修改项目级 <span className="font-mono">.codex/hooks.json</span>
+                        {t("settings.hooks.noProjectHooks")}
                       </Text>
                       <Text size="xs" c="var(--on-surface-variant)">
-                        • Codex 0.129+ 仍需在 TUI 执行 <span className="font-mono">/hooks</span> 批准脚本
+                        {t("settings.hooks.codexApprovalNote")}
                       </Text>
                     </Stack>
                   </Stack>
@@ -1014,8 +1027,8 @@ export function HookSettingsPage() {
 
           <TextInput
             size="xs"
-            label="Codex 配置目录（可手动粘贴，支持 WSL UNC）"
-            placeholder="\\wsl.localhost\Ubuntu-22.04\home\用户名\.codex"
+            label={t("settings.hooks.codexDirInput")}
+            placeholder={t("settings.hooks.codexDirPlaceholder")}
             value={codexSelectedDir ?? ""}
             onChange={(e) => setCodexSelectedDir(e.currentTarget.value || null)}
             onBlur={(e) => void handleManualCodexDirCommit(e.currentTarget.value)}
@@ -1027,16 +1040,16 @@ export function HookSettingsPage() {
 
           <Group gap="xs">
             <Button variant="light" color="cliPrimary" size="xs" onClick={handleSelectCodexDir} disabled={loading || claudeWorking || codexWorking}>
-              选择 Codex 目录
+              {t("settings.hooks.selectCodexButton")}
             </Button>
             <Button color="cliPrimary" size="xs" onClick={handleCodexInstall} disabled={loading || codexWorking || codexStatus === "directoryMissing"}>
-              {codexWorking ? "处理中..." : "安装 Codex Hook"}
+              {codexWorking ? t("settings.hooks.processing") : t("settings.hooks.installCodex")}
             </Button>
             <Button variant="light" color="red" size="xs" onClick={handleCodexUninstall} disabled={loading || codexWorking || codexStatus === "directoryMissing"}>
-              删除 Codex Hook
+              {t("settings.hooks.deleteCodex")}
             </Button>
             <Button variant="default" color="gray" size="xs" onClick={() => void refreshStatus()} disabled={loading || claudeWorking || codexWorking}>
-              {loading ? "刷新中..." : "刷新状态"}
+              {loading ? t("settings.hooks.refreshing") : t("settings.hooks.refreshStatus")}
             </Button>
           </Group>
         </Stack>

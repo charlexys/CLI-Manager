@@ -6,7 +6,7 @@ const CODEX_PROFILE_ARG = "--profile";
 const CODEX_LIGHT_TUI_THEME_ARG = "-c theme=catppuccin-latte";
 const DIRECT_CODEX_COMMAND_PATTERN = /^(\s*codex(?:\.(?:cmd|exe|ps1))?)(?=\s|$)/i;
 
-function isCodexStartupCommand(command: string): boolean {
+export function isCodexStartupCommand(command: string): boolean {
   return /\bcodex(?:\.(?:cmd|exe|ps1))?\b/i.test(command);
 }
 

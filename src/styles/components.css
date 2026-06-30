@@ -1332,6 +1332,23 @@
   color: #fff;
 }
 
+.ui-terminal-theme-mode-segmented {
+  --sc-color: var(--primary) !important;
+}
+
+.ui-terminal-theme-mode-segmented .mantine-SegmentedControl-indicator {
+  background: var(--primary) !important;
+}
+
+.ui-terminal-theme-mode-segmented .mantine-SegmentedControl-label {
+  color: var(--on-surface) !important;
+  font-weight: 500;
+}
+
+.ui-terminal-theme-mode-segmented .mantine-SegmentedControl-label[data-active="true"] {
+  color: var(--on-primary) !important;
+}
+
 .ui-icon-action {
   display: inline-flex;
   align-items: center;

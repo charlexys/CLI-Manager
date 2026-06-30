@@ -31,7 +31,7 @@ import { useUpdateStore } from "./stores/updateStore";
 import { useReplayStore } from "./stores/replayStore";
 import { useTerminalStore, type CliHookPayload } from "./stores/terminalStore";
 import { useModelPricingStore } from "./stores/modelPricingStore";
-import { createPerfMarker, logInfo, logWarn } from "./lib/logger";
+import { createPerfMarker, logWarn } from "./lib/logger";
 import { getContrastRatioFromHex, MIN_APPLY_CONTRAST_RATIO } from "./lib/contrast";
 import { translateCurrent, useI18n } from "./lib/i18n";
 import { getOsPlatform } from "./lib/shell";
@@ -403,15 +403,10 @@ function App() {
     if (tab && tab !== useSettingsStore.getState().lastSettingsTab) {
       void updateSetting("lastSettingsTab", tab);
     }
-    logInfo("settings.window.open", {
-      tab: nextTab,
-      viewMode,
-      windowWidth: typeof window !== "undefined" ? window.innerWidth : null,
-    });
     setSettingsWindowExpanded(true);
     setSettingsOpen(true);
     setSettingsEverOpened(true);
-  }, [lastSettingsTab, updateSetting, viewMode]);
+  }, [lastSettingsTab, updateSetting]);
 
   const handleSettingsTabChange = useCallback((tab: SettingsTab) => {
     if (tab !== useSettingsStore.getState().lastSettingsTab) {
@@ -918,14 +913,10 @@ function App() {
       <CommandPalette />
       <Suspense fallback={null}>
         {settingsEverOpened && (
-          <SettingsModal
-            open={settingsOpen}
-            onClose={() => setSettingsOpen(false)}
+            <SettingsModal
+              open={settingsOpen}
+              onClose={() => setSettingsOpen(false)}
             onAfterClose={() => {
-              logInfo("settings.window.after_close", {
-                viewMode,
-                windowWidth: typeof window !== "undefined" ? window.innerWidth : null,
-              });
               setSettingsWindowExpanded(false);
             }}
             initialTab={settingsInitialTab}

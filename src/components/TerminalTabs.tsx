@@ -23,7 +23,7 @@ import { useSettingsStore } from "../stores/settingsStore";
 import { useProjectStore } from "../stores/projectStore";
 import { isProjectFileDirty, useFileExplorerStore } from "../stores/fileExplorerStore";
 import { useI18n, type TranslationKey } from "../lib/i18n";
-import { logError, logInfo } from "../lib/logger";
+import { logError } from "../lib/logger";
 import type { TerminalPaneDropEdge, TerminalPaneLeaf, TerminalPaneSplitDirection } from "../stores/terminalPaneTree";
 import { collectPaneLeaves, filterPaneTreeBySessionIds, findFirstSessionId } from "../stores/terminalPaneTree";
 import { SplitTerminalView } from "./SplitTerminalView";
@@ -776,26 +776,6 @@ function PaneTabBar({
     .map((session) => `${session.id}:${session.title}:${tabNotifications[session.id] ?? "none"}`)
     .join("|");
 
-  useEffect(() => {
-    logInfo("terminal.tabbar.overflow_state", {
-      paneId: pane.id,
-      activeSessionId: pane.activeSessionId,
-      isOverflowing: tabScrollState.isOverflowing,
-      canScrollLeft: tabScrollState.canScrollLeft,
-      canScrollRight: tabScrollState.canScrollRight,
-      sessionCount: pane.sessionIds.length,
-      overflowControlsVisible,
-    });
-  }, [
-    overflowControlsVisible,
-    pane.activeSessionId,
-    pane.id,
-    pane.sessionIds.length,
-    tabScrollState.canScrollLeft,
-    tabScrollState.canScrollRight,
-    tabScrollState.isOverflowing,
-  ]);
-
   const updateTabScrollState = useCallback(() => {
     const element = tabScrollRef.current;
     if (!element) {
@@ -870,14 +850,6 @@ function PaneTabBar({
     const clampedScrollLeft = isLastTab
       ? maxScrollLeft
       : Math.min(maxScrollLeft, Math.max(0, nextScrollLeft));
-    logInfo("terminal.tabbar.scroll_active_into_view", {
-      paneId: pane.id,
-      activeSessionId,
-      currentScrollLeft: Math.round(element.scrollLeft),
-      nextScrollLeft: Math.round(clampedScrollLeft),
-      maxScrollLeft: Math.round(maxScrollLeft),
-      isLastTab,
-    });
     if (Math.abs(clampedScrollLeft - element.scrollLeft) > 0.5) {
       element.scrollTo({ left: clampedScrollLeft, behavior: "smooth" });
     }
@@ -1864,16 +1836,6 @@ export function TerminalTabs({
   const filesPanelActive = sidePanelMerged ? sidePanelOpen && sidePanelTab === "files" : filesOpen;
 
   useEffect(() => {
-    logInfo("terminal.history.visibility", {
-      historyOpen,
-      activeWorkspaceTab,
-      historyActive,
-      sessionCount: sessions.length,
-      paneCount: paneTree ? collectPaneLeaves(paneTree).length : 0,
-    });
-  }, [activeWorkspaceTab, historyActive, historyOpen, paneTree, sessions.length]);
-
-  useEffect(() => {
     if (!historyOpen && activeWorkspaceTab === "history") setActiveWorkspaceTab("terminal");
   }, [activeWorkspaceTab, historyOpen]);
 
@@ -2249,11 +2211,6 @@ export function TerminalTabs({
   }, [closeFilesPanel, filePanelProject?.id, filesPanelActive, syncFilePanelProject]);
 
   const handleOpenHistoryTab = useCallback(() => {
-    logInfo("terminal.history.toggle", {
-      action: historyOpen ? "close" : "open",
-      from: activeWorkspaceTab,
-      activeSessionId: activeSession?.id ?? null,
-    });
     if (historyOpen) {
       closeHistory();
       return;

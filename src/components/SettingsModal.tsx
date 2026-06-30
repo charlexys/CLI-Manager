@@ -15,7 +15,6 @@ import { ModelPricingSettingsPage } from "./settings/pages/ModelPricingSettingsP
 import { AboutSettingsPage } from "./settings/pages/AboutSettingsPage";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useI18n, type TranslationKey } from "../lib/i18n";
-import { logInfo } from "../lib/logger";
 
 export type SettingsTab =
   | "general"
@@ -129,38 +128,26 @@ export function SettingsModal({ open, onClose, onAfterClose, initialTab, onActiv
   const { t } = useI18n();
   useFocusTrap(dialogRef, mounted && !closing);
 
-  const requestClose = useCallback((reason: "topbar" | "backdrop" | "escape") => {
-    logInfo("settings.modal.close.request", {
-      reason,
-      activeTab,
-      mounted,
-      closing,
-    });
+  const requestClose = useCallback((_reason: "topbar" | "backdrop" | "escape") => {
     onClose();
-  }, [activeTab, closing, mounted, onClose]);
+  }, [onClose]);
 
   useEffect(() => {
     if (open && !wasOpenRef.current) {
       if (initialTab) setActiveTab(initialTab);
       setMounted(true);
       setClosing(false);
-      logInfo("settings.modal.open", {
-        activeTab: initialTab ?? activeTab,
-      });
     }
     wasOpenRef.current = open;
-  }, [open, initialTab, activeTab]);
+  }, [open, initialTab]);
 
   useEffect(() => {
     if (open) return;
     if (!mounted) return;
-    logInfo("settings.modal.close.commit", {
-      activeTab,
-    });
     setMounted(false);
     setClosing(false);
     onAfterClose?.();
-  }, [open, mounted, initialTab, onAfterClose, activeTab]);
+  }, [open, mounted, initialTab, onAfterClose]);
 
   const handleTabChange = (tab: SettingsTab) => {
     if (tab === activeTab) return;

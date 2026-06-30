@@ -346,6 +346,14 @@ fn resolve_wsl_transcript_path(
     Ok(resolved)
 }
 
+fn resolve_wsl_distro_name(cwd: Option<&str>, wsl_distro_name: Option<String>) -> Option<String> {
+    if let Some(distro) = trimmed(wsl_distro_name) {
+        return Some(distro);
+    }
+    cwd.and_then(crate::wsl::parse_wsl_unc_path)
+        .map(|(distro, _)| distro)
+}
+
 fn home_dir() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -503,7 +511,8 @@ fn resolve_transcript_path(
     let cwd = trimmed(cwd).ok_or_else(|| "missing_cwd".to_string())?;
     let session_id = trimmed(session_id).ok_or_else(|| "missing_session_id".to_string())?;
     let agent_id = trimmed(agent_id).ok_or_else(|| "missing_agent_id".to_string())?;
-    if let Some(distro) = trimmed(wsl_distro_name) {
+    let resolved_wsl_distro = resolve_wsl_distro_name(Some(&cwd), wsl_distro_name);
+    if let Some(distro) = resolved_wsl_distro {
         info!(
             "[subagent_transcript] resolving derived WSL transcript path: distro={distro} cwd={cwd} sessionId={session_id} agentId={agent_id}"
         );
@@ -556,7 +565,8 @@ pub async fn subagent_transcript_discover(
     session_id: String,
     wsl_distro_name: Option<String>,
 ) -> Result<Vec<String>, String> {
-    if let Some(distro) = trimmed(wsl_distro_name) {
+    let resolved_wsl_distro = resolve_wsl_distro_name(Some(&cwd), wsl_distro_name);
+    if let Some(distro) = resolved_wsl_distro {
         info!(
             "[subagent_transcript:wsl] discover requested: distro={distro} cwd={cwd} sessionId={session_id}"
         );
@@ -620,6 +630,12 @@ pub async fn codex_subagent_transcript_discover(
     }
 
     let sessions_root = resolve_codex_sessions_root(codex_config_dir);
+    info!(
+        "[subagent_transcript:codex] discover requested: root={} parentSessionId={} agentId={}",
+        sessions_root.to_string_lossy(),
+        parent_session_id,
+        agent_id
+    );
     if !sessions_root.exists() {
         info!(
             "[subagent_transcript:codex] sessions root missing: {}",
@@ -628,7 +644,14 @@ pub async fn codex_subagent_transcript_discover(
         return Ok(None);
     }
 
-    for candidate in list_codex_rollout_candidates(&sessions_root, &agent_id) {
+    let candidates = list_codex_rollout_candidates(&sessions_root, &agent_id);
+    info!(
+        "[subagent_transcript:codex] rollout candidates: root={} agentId={} count={}",
+        sessions_root.to_string_lossy(),
+        agent_id,
+        candidates.len()
+    );
+    for candidate in candidates {
         let parent_thread_id = codex_rollout_parent_thread_id(&candidate);
         info!(
             "[subagent_transcript:codex] inspect rollout candidate: agentId={} path={} parentThreadId={:?}",
@@ -637,9 +660,21 @@ pub async fn codex_subagent_transcript_discover(
             parent_thread_id
         );
         if parent_thread_id.as_deref() == Some(parent_session_id.as_str()) {
+            info!(
+                "[subagent_transcript:codex] rollout matched: agentId={} path={}",
+                agent_id,
+                candidate.to_string_lossy()
+            );
             return Ok(Some(candidate.to_string_lossy().to_string()));
         }
     }
+
+    info!(
+        "[subagent_transcript:codex] rollout not found: root={} parentSessionId={} agentId={}",
+        sessions_root.to_string_lossy(),
+        parent_session_id,
+        agent_id
+    );
 
     Ok(None)
 }
@@ -789,6 +824,24 @@ mod tests {
             got,
             r"\\wsl.localhost\Ubuntu\home\me\.claude\projects\-mnt-d-work-pythonProject-CLI-Manager\sess-1\subagents\agent-a99.jsonl"
         );
+    }
+
+    #[test]
+    fn resolves_wsl_distro_from_unc_cwd_when_env_missing() {
+        let got = resolve_wsl_distro_name(
+            Some(r"\\wsl.localhost\Ubuntu\data\test\sys"),
+            None,
+        );
+        assert_eq!(got.as_deref(), Some("Ubuntu"));
+    }
+
+    #[test]
+    fn explicit_wsl_distro_overrides_unc_cwd() {
+        let got = resolve_wsl_distro_name(
+            Some(r"\\wsl.localhost\Ubuntu\data\test\sys"),
+            Some("Debian".to_string()),
+        );
+        assert_eq!(got.as_deref(), Some("Debian"));
     }
 
     #[test]

@@ -46,6 +46,8 @@ const FONT_SIZE_MAX = 32;
 const MIN_TERMINAL_COLS = 40;
 const MIN_TERMINAL_ROWS = 8;
 const ACTIVE_WRITE_FRAME_BUDGET = 64 * 1024;
+const ACTIVE_WRITE_QUEUE_MAX_CHARS = 16 * 1024 * 1024;
+const ACTIVE_WRITE_QUEUE_LOG_INTERVAL_MS = 2000;
 const SEARCH_HIGHLIGHT_LIMIT = 1000;
 const INACTIVE_BUFFER_MIN_CHARS = 256 * 1024;
 const INACTIVE_BUFFER_MAX_CHARS = 8 * 1024 * 1024;
@@ -314,6 +316,8 @@ export function XTermTerminal({ sessionId, isActive = true, isVisible = true, fo
   const inactiveBufferRef = useRef<string[]>([]);
   const inactiveBufferSizeRef = useRef(0);
   const activeWriteQueueRef = useRef<string[]>([]);
+  const activeWriteQueueSizeRef = useRef(0);
+  const activeWriteQueueLastDropLogAtRef = useRef(0);
   const activeWriteRafRef = useRef<number | null>(null);
   const cursorShowTimerRef = useRef<number | null>(null);
   const tuiComposerNormalizeRafRef = useRef<number | null>(null);
@@ -825,11 +829,13 @@ export function XTermTerminal({ sessionId, isActive = true, isVisible = true, fo
       if (chunk.length <= budget) {
         writeTerminalChunk(chunk);
         activeWriteQueueRef.current.shift();
+        activeWriteQueueSizeRef.current = Math.max(0, activeWriteQueueSizeRef.current - chunk.length);
         budget -= chunk.length;
         continue;
       }
       writeTerminalChunk(chunk.slice(0, budget));
       activeWriteQueueRef.current[0] = chunk.slice(budget);
+      activeWriteQueueSizeRef.current = Math.max(0, activeWriteQueueSizeRef.current - budget);
       budget = 0;
     }
 
@@ -840,7 +846,45 @@ export function XTermTerminal({ sessionId, isActive = true, isVisible = true, fo
 
   const enqueueActiveWrite = (text: string) => {
     if (!text) return;
-    activeWriteQueueRef.current.push(processCursorVisibility(text));
+    let nextText = processCursorVisibility(text);
+    let droppedChars = 0;
+    if (nextText.length >= ACTIVE_WRITE_QUEUE_MAX_CHARS) {
+      droppedChars += activeWriteQueueSizeRef.current + nextText.length - ACTIVE_WRITE_QUEUE_MAX_CHARS;
+      nextText = nextText.slice(-ACTIVE_WRITE_QUEUE_MAX_CHARS);
+      activeWriteQueueRef.current = [];
+      activeWriteQueueSizeRef.current = 0;
+    }
+    activeWriteQueueRef.current.push(nextText);
+    activeWriteQueueSizeRef.current += nextText.length;
+    while (activeWriteQueueSizeRef.current > ACTIVE_WRITE_QUEUE_MAX_CHARS && activeWriteQueueRef.current.length > 0) {
+      const overflow = activeWriteQueueSizeRef.current - ACTIVE_WRITE_QUEUE_MAX_CHARS;
+      const head = activeWriteQueueRef.current[0];
+      if (!head || head.length <= overflow) {
+        const removed = activeWriteQueueRef.current.shift();
+        const removedLength = removed?.length ?? 0;
+        activeWriteQueueSizeRef.current -= removedLength;
+        droppedChars += removedLength;
+        continue;
+      }
+      activeWriteQueueRef.current[0] = head.slice(overflow);
+      activeWriteQueueSizeRef.current -= overflow;
+      droppedChars += overflow;
+    }
+    if (droppedChars > 0) {
+      const now = Date.now();
+      if (now - activeWriteQueueLastDropLogAtRef.current >= ACTIVE_WRITE_QUEUE_LOG_INTERVAL_MS) {
+        activeWriteQueueLastDropLogAtRef.current = now;
+        console.warn("[oom-diagnostics:webview]", {
+          area: "xterm",
+          phase: "activeWriteQueueTrim",
+          sessionId,
+          droppedChars,
+          queuedChars: activeWriteQueueSizeRef.current,
+          maxQueuedChars: ACTIVE_WRITE_QUEUE_MAX_CHARS,
+          thresholdExceeded: true,
+        });
+      }
+    }
     if (activeWriteRafRef.current === null) {
       activeWriteRafRef.current = requestAnimationFrame(flushActiveWriteQueue);
     }
@@ -1769,6 +1813,7 @@ export function XTermTerminal({ sessionId, isActive = true, isVisible = true, fo
       }
       pendingChunks = [];
       activeWriteQueueRef.current = [];
+      activeWriteQueueSizeRef.current = 0;
       inactiveBufferRef.current = [];
       inactiveBufferSizeRef.current = 0;
       unlisten?.();

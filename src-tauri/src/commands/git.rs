@@ -8,6 +8,39 @@ use crate::shell_resolver::silent_command;
 
 const GIT_DIFF_LINE_STATS_STATUS_LIMIT: usize = 500;
 const GIT_DIFF_LINE_STATS_LINE_LIMIT: usize = 200_000;
+const OOM_PATCH_WARN_BYTES: usize = 1024 * 1024;
+const OOM_SNAPSHOT_PATCH_RETURN_MAX_BYTES: usize = 1024 * 1024;
+const OOM_SNAPSHOT_FILES_WARN_COUNT: usize = 500;
+
+fn log_worktree_snapshot_oom_diagnostic(
+    phase: &str,
+    project_path: &str,
+    snapshot: &GitWorktreeSnapshot,
+    elapsed_ms: u128,
+) {
+    let patch_bytes = snapshot.patch_bytes;
+    let threshold_exceeded = patch_bytes >= OOM_PATCH_WARN_BYTES
+        || snapshot.files.len() >= OOM_SNAPSHOT_FILES_WARN_COUNT;
+    if threshold_exceeded {
+        log::warn!(
+            "[oom-diagnostics:backend] area=git phase={phase} project_path={} dirty={} files={} patch_bytes={} elapsed_ms={} threshold_exceeded=true",
+            project_path,
+            snapshot.dirty,
+            snapshot.files.len(),
+            patch_bytes,
+            elapsed_ms
+        );
+    } else {
+        log::info!(
+            "[oom-diagnostics:backend] area=git phase={phase} project_path={} dirty={} files={} patch_bytes={} elapsed_ms={} threshold_exceeded=false",
+            project_path,
+            snapshot.dirty,
+            snapshot.files.len(),
+            patch_bytes,
+            elapsed_ms
+        );
+    }
+}
 
 /// 打开 Git 仓库的统一入口，兼容 WSL UNC 路径。
 ///
@@ -130,6 +163,8 @@ pub struct GitWorktreeSnapshot {
     pub branch: Option<String>,
     pub dirty: bool,
     pub patch: String,
+    pub patch_bytes: usize,
+    pub patch_truncated: bool,
     pub files: Vec<GitFileChange>,
 }
 
@@ -541,6 +576,7 @@ fn build_worktree_snapshot(
     repo: &Repository,
 ) -> Result<GitWorktreeSnapshot, String> {
     let patch = build_worktree_patch(repo)?;
+    let patch_bytes = patch.len();
     let files = collect_git_changes_from_repo(repo)?;
     Ok(GitWorktreeSnapshot {
         project_path: project_path.to_string(),
@@ -548,8 +584,18 @@ fn build_worktree_snapshot(
         branch: repo_branch_name(repo),
         dirty: !patch.trim().is_empty() || !files.is_empty(),
         patch,
+        patch_bytes,
+        patch_truncated: false,
         files,
     })
+}
+
+fn truncate_snapshot_patch_for_webview(snapshot: &mut GitWorktreeSnapshot) {
+    if snapshot.patch.len() <= OOM_SNAPSHOT_PATCH_RETURN_MAX_BYTES {
+        return;
+    }
+    snapshot.patch.clear();
+    snapshot.patch_truncated = true;
 }
 
 fn should_skip_diff_line_stats(status_count: usize) -> bool {
@@ -795,12 +841,21 @@ pub async fn git_get_worktree_snapshot(
     log::info!("[git_get_worktree_snapshot] project_path: {}", project_path);
 
     tokio::task::spawn_blocking(move || {
+        let started_at = std::time::Instant::now();
         let path = Path::new(&project_path);
         if !crate::wsl::is_wsl_config_dir(&project_path) && !path.exists() {
             return Err("path_not_found".to_string());
         }
         let repo = open_git_repo(path).map_err(|e| format!("open_repo_failed: {e}"))?;
-        build_worktree_snapshot(&project_path, &repo)
+        let mut snapshot = build_worktree_snapshot(&project_path, &repo)?;
+        truncate_snapshot_patch_for_webview(&mut snapshot);
+        log_worktree_snapshot_oom_diagnostic(
+            "git_get_worktree_snapshot",
+            &project_path,
+            &snapshot,
+            started_at.elapsed().as_millis(),
+        );
+        Ok(snapshot)
     })
     .await
     .map_err(|e| format!("task_failed: {e}"))?

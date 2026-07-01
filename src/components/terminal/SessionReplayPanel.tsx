@@ -76,6 +76,26 @@ const STATUS_KEYS: Record<ReplayEventStatus, TranslationKey> = {
 };
 
 const TIMELINE_LINE_LEFT = "calc(78px + 12px + 14px)";
+const OOM_PATCH_WARN_BYTES = 1024 * 1024;
+const OOM_REPLAY_EVENTS_WARN_COUNT = 200;
+
+function stringByteLength(value: string): number {
+  if (typeof Blob !== "undefined") return new Blob([value]).size;
+  return value.length;
+}
+
+function logReplayPanelOomDiagnostic(phase: string, fields: Record<string, unknown>, warn = false): void {
+  const payload = {
+    area: "aiReplayPanel",
+    phase,
+    ...fields,
+  };
+  if (warn) {
+    console.warn("[oom-diagnostics:webview]", payload);
+  } else {
+    console.info("[oom-diagnostics:webview]", payload);
+  }
+}
 
 function statusColor(status: ReplayEventStatus): string {
   if (status === "failed" || status === "attention") return TERM_PANEL.red;
@@ -403,6 +423,15 @@ export function SessionReplayPanel({ activeSessionId, open, visible = true }: Se
     if (activeSessionId) void loadSession(activeSessionId);
   }, [activeSessionId, loadRecentSessions, loadSession, panelActive]);
 
+  useEffect(() => {
+    if (!panelActive) return;
+    logReplayPanelOomDiagnostic("panelActive", {
+      activeSessionId,
+      knownSessions: sessions.length,
+      selectedSessionKey,
+    }, sessions.length >= 12);
+  }, [activeSessionId, panelActive, selectedSessionKey, sessions.length]);
+
   const selectedSession = sessions.find((session) => session.sessionKey === selectedSessionKey) ?? null;
   const events = selectedSessionKey ? eventsBySession[selectedSessionKey] ?? [] : [];
   const firstTimestamp = events[0]?.timestamp ?? null;
@@ -502,6 +531,15 @@ export function SessionReplayPanel({ activeSessionId, open, visible = true }: Se
   const handleViewSnapshot = (event: ReplayEvent) => {
     const patch = getStringPayload(event.payload, "patch");
     if (!patch) return;
+    const patchBytes = stringByteLength(patch);
+    logReplayPanelOomDiagnostic("viewSnapshotDiff", {
+      sessionKey: event.sessionKey,
+      eventIndex: event.eventIndex,
+      patchBytes,
+      currentEvents: events.length,
+      filteredEvents: filteredEvents.length,
+      thresholdExceeded: patchBytes >= OOM_PATCH_WARN_BYTES || events.length >= OOM_REPLAY_EVENTS_WARN_COUNT,
+    }, patchBytes >= OOM_PATCH_WARN_BYTES || events.length >= OOM_REPLAY_EVENTS_WARN_COUNT);
     setSnapshotDiffMessages([
       {
         role: "assistant",

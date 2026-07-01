@@ -60,6 +60,8 @@ export interface ReplayWorktreeSnapshot {
   branch: string | null;
   dirty: boolean;
   patch: string;
+  patchBytes?: number;
+  patchTruncated?: boolean;
   files: ReplaySnapshotFile[];
 }
 
@@ -106,6 +108,50 @@ interface ReplayStore {
 }
 
 let initPromise: Promise<void> | null = null;
+
+const OOM_PAYLOAD_WARN_BYTES = 512 * 1024;
+const OOM_PATCH_WARN_BYTES = 1024 * 1024;
+const OOM_REPLAY_EVENTS_WARN_COUNT = 200;
+const REPLAY_EVENTS_IN_MEMORY_LIMIT = 200;
+
+function stringByteLength(value: string): number {
+  if (typeof Blob !== "undefined") return new Blob([value]).size;
+  return value.length;
+}
+
+function getPayloadPatchBytes(payload: Record<string, unknown>): number {
+  const patch = payload.patch;
+  if (typeof patch === "string" && patch.length > 0) return stringByteLength(patch);
+  const patchBytes = payload.patchBytes;
+  return typeof patchBytes === "number" && Number.isFinite(patchBytes) ? patchBytes : 0;
+}
+
+function getEventsPatchStats(events: ReplayEvent[]): { snapshotCount: number; maxPatchBytes: number; totalPatchBytes: number } {
+  let snapshotCount = 0;
+  let maxPatchBytes = 0;
+  let totalPatchBytes = 0;
+  for (const event of events) {
+    const patchBytes = getPayloadPatchBytes(event.payload);
+    if (patchBytes <= 0) continue;
+    snapshotCount += 1;
+    totalPatchBytes += patchBytes;
+    maxPatchBytes = Math.max(maxPatchBytes, patchBytes);
+  }
+  return { snapshotCount, maxPatchBytes, totalPatchBytes };
+}
+
+function logReplayOomDiagnostic(phase: string, fields: Record<string, unknown>, warn = false): void {
+  const payload = {
+    area: "aiReplay",
+    phase,
+    ...fields,
+  };
+  if (warn) {
+    console.warn("[oom-diagnostics:webview]", payload);
+  } else {
+    console.info("[oom-diagnostics:webview]", payload);
+  }
+}
 
 function normalizeTimestamp(value: string | null | undefined): string {
   if (!value) return new Date().toISOString();
@@ -341,11 +387,36 @@ async function fetchSession(sessionKey: string): Promise<ReplaySession | null> {
 
 async function fetchEvents(sessionKey: string): Promise<ReplayEvent[]> {
   const db = await getDb();
-  const rows = await db.select<ReplayEventRow[]>(
-    "SELECT * FROM ai_replay_events WHERE session_key = $1 ORDER BY event_index ASC",
+  const countRows = await db.select<Array<{ total: number | null }>>(
+    "SELECT COUNT(*) AS total FROM ai_replay_events WHERE session_key = $1",
     [sessionKey]
   );
-  return rows.map(mapEvent);
+  const storedEvents = countRows[0]?.total ?? 0;
+  const rows = await db.select<ReplayEventRow[]>(
+    "SELECT * FROM ai_replay_events WHERE session_key = $1 ORDER BY event_index DESC LIMIT $2",
+    [sessionKey, REPLAY_EVENTS_IN_MEMORY_LIMIT]
+  );
+  const events = rows.reverse().map(mapEvent);
+  const payloadBytes = rows.reduce((sum, row) => sum + stringByteLength(row.payload_json), 0);
+  const maxPayloadBytes = rows.reduce((max, row) => Math.max(max, stringByteLength(row.payload_json)), 0);
+  const patchStats = getEventsPatchStats(events);
+  logReplayOomDiagnostic("fetchEvents", {
+    sessionKey,
+    events: events.length,
+    storedEvents,
+    inMemoryLimit: REPLAY_EVENTS_IN_MEMORY_LIMIT,
+    payloadBytes,
+    maxPayloadBytes,
+    snapshotCount: patchStats.snapshotCount,
+    totalPatchBytes: patchStats.totalPatchBytes,
+    maxPatchBytes: patchStats.maxPatchBytes,
+    thresholdExceeded: storedEvents >= OOM_REPLAY_EVENTS_WARN_COUNT ||
+      maxPayloadBytes >= OOM_PAYLOAD_WARN_BYTES ||
+      patchStats.maxPatchBytes >= OOM_PATCH_WARN_BYTES,
+  }, storedEvents >= OOM_REPLAY_EVENTS_WARN_COUNT ||
+    maxPayloadBytes >= OOM_PAYLOAD_WARN_BYTES ||
+    patchStats.maxPatchBytes >= OOM_PATCH_WARN_BYTES);
+  return events;
 }
 
 interface ReplayEventDraft {
@@ -383,6 +454,10 @@ async function persistReplayEvent(
   const timestamp = normalizeTimestamp(eventDraft.timestamp);
   const startedAt = existing?.startedAt ?? timestamp;
   let eventIndex = 1;
+  const tagsJson = JSON.stringify(eventDraft.tags);
+  const payloadJson = JSON.stringify(eventDraft.payload);
+  const payloadBytes = stringByteLength(payloadJson);
+  const patchBytes = getPayloadPatchBytes(eventDraft.payload);
 
   for (let attempt = 1; attempt <= REPLAY_EVENT_INSERT_ATTEMPTS; attempt += 1) {
     const nextIndexRows = await db.select<Array<{ next_index: number | null }>>(
@@ -405,8 +480,8 @@ async function persistReplayEvent(
           timestamp,
           eventDraft.durationMs,
           eventDraft.status,
-          JSON.stringify(eventDraft.tags),
-          JSON.stringify(eventDraft.payload),
+          tagsJson,
+          payloadJson,
         ]
       );
       break;
@@ -433,6 +508,19 @@ async function persistReplayEvent(
       eventIndex,
     ]
   );
+  logReplayOomDiagnostic("persistEvent", {
+    sessionKey,
+    eventIndex,
+    kind: eventDraft.kind,
+    status: eventDraft.status,
+    payloadBytes,
+    patchBytes,
+    thresholdExceeded: eventIndex >= OOM_REPLAY_EVENTS_WARN_COUNT ||
+      payloadBytes >= OOM_PAYLOAD_WARN_BYTES ||
+      patchBytes >= OOM_PATCH_WARN_BYTES,
+  }, eventIndex >= OOM_REPLAY_EVENTS_WARN_COUNT ||
+    payloadBytes >= OOM_PAYLOAD_WARN_BYTES ||
+    patchBytes >= OOM_PATCH_WARN_BYTES);
 
   return {
     session: {
@@ -468,12 +556,26 @@ function applyPersistedEvent(session: ReplaySession, event: ReplayEvent) {
     sessions: [session, ...state.sessions.filter((item) => item.sessionKey !== session.sessionKey)].slice(0, 12),
     eventsBySession: {
       ...state.eventsBySession,
-      [session.sessionKey]: [...(state.eventsBySession[session.sessionKey] ?? []), event],
+      [session.sessionKey]: [...(state.eventsBySession[session.sessionKey] ?? []), event].slice(-REPLAY_EVENTS_IN_MEMORY_LIMIT),
     },
     selectedSessionKey: state.selectedSessionKey ?? session.sessionKey,
     ready: true,
     error: null,
   }));
+  const events = useReplayStore.getState().eventsBySession[session.sessionKey] ?? [];
+  const patchStats = getEventsPatchStats(events);
+  logReplayOomDiagnostic("applyPersistedEvent", {
+    sessionKey: session.sessionKey,
+    events: events.length,
+    latestKind: event.kind,
+    latestEventIndex: event.eventIndex,
+    snapshotCount: patchStats.snapshotCount,
+    totalPatchBytes: patchStats.totalPatchBytes,
+    maxPatchBytes: patchStats.maxPatchBytes,
+    thresholdExceeded: events.length >= OOM_REPLAY_EVENTS_WARN_COUNT ||
+      patchStats.maxPatchBytes >= OOM_PATCH_WARN_BYTES,
+    inMemoryLimit: REPLAY_EVENTS_IN_MEMORY_LIMIT,
+  }, events.length >= OOM_REPLAY_EVENTS_WARN_COUNT || patchStats.maxPatchBytes >= OOM_PATCH_WARN_BYTES);
 }
 
 function shouldCaptureSnapshot(event: CliHookEventName): boolean {
@@ -540,6 +642,17 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     try {
       await ensureTables();
       const [session, events] = await Promise.all([fetchSession(sessionKey), fetchEvents(sessionKey)]);
+      const patchStats = getEventsPatchStats(events);
+      logReplayOomDiagnostic("loadSession", {
+        sessionKey,
+        found: Boolean(session),
+        events: events.length,
+        snapshotCount: patchStats.snapshotCount,
+        totalPatchBytes: patchStats.totalPatchBytes,
+        maxPatchBytes: patchStats.maxPatchBytes,
+        thresholdExceeded: events.length >= OOM_REPLAY_EVENTS_WARN_COUNT ||
+          patchStats.maxPatchBytes >= OOM_PATCH_WARN_BYTES,
+      }, events.length >= OOM_REPLAY_EVENTS_WARN_COUNT || patchStats.maxPatchBytes >= OOM_PATCH_WARN_BYTES);
       set((state) => ({
         sessions: session
           ? [session, ...state.sessions.filter((item) => item.sessionKey !== session.sessionKey)].slice(0, 12)
@@ -577,6 +690,18 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       const cliSessionId = trimOptional(payload.sessionId) ?? existing?.cliSessionId ?? null;
       const projectPath = trimOptional(payload.cwd) ?? existing?.projectPath ?? null;
       const source = trimOptional(payload.source) ?? existing?.source ?? null;
+      const rawPayload = payload as unknown as Record<string, unknown>;
+      const rawPayloadBytes = stringByteLength(JSON.stringify(rawPayload));
+      const willCaptureSnapshot = Boolean(projectPath && shouldCaptureSnapshot(payload.event));
+      logReplayOomDiagnostic("recordCliHookEvent", {
+        sessionKey,
+        event: payload.event,
+        source,
+        projectPath: Boolean(projectPath),
+        payloadBytes: rawPayloadBytes,
+        willCaptureSnapshot,
+        thresholdExceeded: rawPayloadBytes >= OOM_PAYLOAD_WARN_BYTES,
+      }, rawPayloadBytes >= OOM_PAYLOAD_WARN_BYTES);
       const { session, event } = await persistReplayEvent(
         sessionKey,
         { title, cliSessionId, source, projectPath },
@@ -588,7 +713,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           durationMs: classified.durationMs,
           status: classified.status,
           tags: classified.tags,
-          payload: payload as unknown as Record<string, unknown>,
+          payload: rawPayload,
         }
       );
       applyPersistedEvent(session, event);
@@ -607,13 +732,33 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     if (!normalizedProjectPath) return null;
     try {
       await ensureTables();
+      const startedAt = performance.now();
       const snapshot = await invoke<ReplayWorktreeSnapshot>("git_get_worktree_snapshot", {
         projectPath: normalizedProjectPath,
       });
-      if (!snapshot.dirty || !snapshot.patch.trim()) return null;
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      const patchBytes = snapshot.patchBytes ?? stringByteLength(snapshot.patch);
+      logReplayOomDiagnostic("captureCodeSnapshot.result", {
+        sessionKey,
+        projectPath: normalizedProjectPath,
+        reason: reason ?? "manual",
+        dirty: snapshot.dirty,
+        files: snapshot.files.length,
+        patchBytes,
+        patchTruncated: Boolean(snapshot.patchTruncated),
+        elapsedMs,
+        thresholdExceeded: patchBytes >= OOM_PATCH_WARN_BYTES || Boolean(snapshot.patchTruncated),
+      }, patchBytes >= OOM_PATCH_WARN_BYTES || Boolean(snapshot.patchTruncated));
+      if (!snapshot.dirty) return null;
+      if (!snapshot.patch.trim() && !snapshot.patchTruncated) return null;
 
       const lastSnapshot = await getLastSnapshotPayload(sessionKey);
-      if (lastSnapshot?.patch === snapshot.patch && lastSnapshot?.head === snapshot.head) {
+      if (!snapshot.patchTruncated && lastSnapshot?.patch === snapshot.patch && lastSnapshot?.head === snapshot.head) {
+        logReplayOomDiagnostic("captureCodeSnapshot.skippedDuplicate", {
+          sessionKey,
+          projectPath: normalizedProjectPath,
+          patchBytes,
+        }, patchBytes >= OOM_PATCH_WARN_BYTES);
         return null;
       }
 
@@ -626,6 +771,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       });
       const payload: Record<string, unknown> = {
         ...snapshot,
+        patchBytes,
         checkpointId: `snapshot-${Date.now().toString(36)}`,
         reason: reason ?? "manual",
         changedFiles: snapshot.files.map((file) => file.path),

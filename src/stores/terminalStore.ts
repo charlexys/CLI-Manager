@@ -82,6 +82,7 @@ const TAB_STATUS_PRIORITY: Record<TabNotificationState, number> = {
   failed: 3,
   attention: 4,
 };
+const SUBAGENT_TRANSCRIPT_MAX_CHARS = 4 * 1024 * 1024;
 
 export interface CliHookPayload {
   tabId: string;
@@ -110,6 +111,7 @@ export interface SubagentTranscriptContent {
   content: string;
   ended: boolean;
   source: SubagentTranscriptSource;
+  truncatedBytes?: number;
 }
 
 interface SubagentTranscriptSubscribeResult {
@@ -1881,9 +1883,52 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       const prev = state.subagentTranscripts[key];
       // 仅更新已存在的订阅（本窗口 openSubagentTranscript 预置）；未知 key 忽略（多窗口广播）。
       if (!prev) return state;
-      const nextContent = (reset ? "" : prev.content) + content;
+      let droppedChars = 0;
+      let nextContent: string;
+      if (content.length >= SUBAGENT_TRANSCRIPT_MAX_CHARS) {
+        nextContent = content.slice(-SUBAGENT_TRANSCRIPT_MAX_CHARS);
+        droppedChars = (reset ? 0 : prev.content.length) + content.length - nextContent.length;
+      } else if (reset) {
+        nextContent = content;
+      } else {
+        const maxPrevChars = SUBAGENT_TRANSCRIPT_MAX_CHARS - content.length;
+        const prevTail = prev.content.length > maxPrevChars ? prev.content.slice(-maxPrevChars) : prev.content;
+        droppedChars = prev.content.length - prevTail.length;
+        nextContent = prevTail + content;
+      }
+      if (droppedChars > 0) {
+        console.warn("[oom-diagnostics:webview]", {
+          area: "subagentTranscript",
+          phase: "appendTrim",
+          key,
+          droppedChars,
+          contentChars: content.length,
+          retainedChars: nextContent.length,
+          maxChars: SUBAGENT_TRANSCRIPT_MAX_CHARS,
+          reset,
+          thresholdExceeded: true,
+        });
+        logWarn("[oom-diagnostics:webview] subagent transcript trimmed", {
+          area: "subagentTranscript",
+          phase: "appendTrim",
+          key,
+          droppedChars,
+          contentChars: content.length,
+          retainedChars: nextContent.length,
+          maxChars: SUBAGENT_TRANSCRIPT_MAX_CHARS,
+          reset,
+          thresholdExceeded: true,
+        });
+      }
       return {
-        subagentTranscripts: { ...state.subagentTranscripts, [key]: { ...prev, content: nextContent } },
+        subagentTranscripts: {
+          ...state.subagentTranscripts,
+          [key]: {
+            ...prev,
+            content: nextContent,
+            truncatedBytes: (reset ? 0 : prev.truncatedBytes ?? 0) + droppedChars,
+          },
+        },
       };
     });
   },

@@ -26,6 +26,39 @@ use tauri::{AppHandle, Emitter, State};
 
 const EVENT_NAME: &str = "subagent-transcript-append";
 const POLL_MS: u64 = 250;
+const OOM_TRANSCRIPT_APPEND_WARN_BYTES: usize = 1024 * 1024;
+const OOM_TRANSCRIPT_OFFSET_WARN_BYTES: u64 = 10 * 1024 * 1024;
+
+fn log_transcript_oom_diagnostic(
+    phase: &str,
+    key: &str,
+    path: &str,
+    append_bytes: usize,
+    offset: u64,
+    reset: bool,
+) {
+    let threshold_exceeded = append_bytes >= OOM_TRANSCRIPT_APPEND_WARN_BYTES
+        || offset >= OOM_TRANSCRIPT_OFFSET_WARN_BYTES;
+    if threshold_exceeded {
+        warn!(
+            "[oom-diagnostics:backend] area=subagent_transcript phase={phase} key={} path={} append_bytes={} offset={} reset={} threshold_exceeded=true",
+            key,
+            path,
+            append_bytes,
+            offset,
+            reset
+        );
+    } else {
+        info!(
+            "[oom-diagnostics:backend] area=subagent_transcript phase={phase} key={} path={} append_bytes={} offset={} reset={} threshold_exceeded=false",
+            key,
+            path,
+            append_bytes,
+            offset,
+            reset
+        );
+    }
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +116,14 @@ impl SubagentTranscriptBridge {
             .map(|(content, offset, _)| (content, offset))
             .unwrap_or_else(|| (String::new(), 0));
         let has_initial_content = initial_offset > 0;
+        log_transcript_oom_diagnostic(
+            "subscribe_initial",
+            &key,
+            &path,
+            initial_content.len(),
+            initial_offset,
+            true,
+        );
         let thread_key = key.clone();
         let thread_path = path.clone();
         thread::spawn(move || {
@@ -147,6 +188,14 @@ fn tail_loop(
                 "[subagent_transcript] tail read lines: key={key} bytes={} offset={} reset={reset}",
                 content.len(),
                 offset
+            );
+            log_transcript_oom_diagnostic(
+                "tail_append",
+                &key,
+                path.to_string_lossy().as_ref(),
+                content.len(),
+                offset,
+                reset,
             );
             let payload = AppendPayload {
                 key: key.clone(),
@@ -926,10 +975,7 @@ mod tests {
 
     #[test]
     fn resolves_wsl_distro_from_unc_cwd_when_env_missing() {
-        let got = resolve_wsl_distro_name(
-            Some(r"\\wsl.localhost\Ubuntu\data\test\sys"),
-            None,
-        );
+        let got = resolve_wsl_distro_name(Some(r"\\wsl.localhost\Ubuntu\data\test\sys"), None);
         assert_eq!(got.as_deref(), Some("Ubuntu"));
     }
 

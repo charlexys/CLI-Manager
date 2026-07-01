@@ -34,6 +34,7 @@ const SOURCE_COLOR = {
   "parent-jsonl": TERM.yellow,
   "lifecycle-only": TERM.dim,
 } as const;
+const TRANSCRIPT_PARSE_MAX_CHARS = 2 * 1024 * 1024;
 
 /** 从 Claude transcript 的 message.content（string 或 block 数组）提取可读文本。 */
 function extractText(content: unknown): string {
@@ -108,9 +109,22 @@ function parseCodexResponseItem(obj: Record<string, unknown>, id: number): Rende
 
 /** 解析累积的 jsonl 文本为可渲染消息列表（跳过解析失败行）。 */
 function parseTranscript(content: string): RenderedMessage[] {
+  const parseContent = content.length > TRANSCRIPT_PARSE_MAX_CHARS
+    ? content.slice(-TRANSCRIPT_PARSE_MAX_CHARS)
+    : content;
+  if (parseContent.length !== content.length) {
+    console.warn("[oom-diagnostics:webview]", {
+      area: "subagentTranscript",
+      phase: "parseTailOnly",
+      contentChars: content.length,
+      parsedChars: parseContent.length,
+      droppedChars: content.length - parseContent.length,
+      thresholdExceeded: true,
+    });
+  }
   const out: RenderedMessage[] = [];
   let id = 0;
-  for (const line of content.split("\n")) {
+  for (const line of parseContent.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     let obj: Record<string, unknown>;

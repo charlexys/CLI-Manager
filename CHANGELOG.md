@@ -1,6 +1,11 @@
 ﻿# Changelog
 
 ## [TEMP] - 2026-07-01
+### 调试诊断
+
+- **OOM 诊断日志**：为 AI Replay 快照、历史详情/统计和子 Agent transcript 链路补充 WebView 控制台与后端日志，输出事件数、payload/patch 字节数、历史消息大小和耗时等指标，方便排查 V1.2.3 后的内存峰值问题。
+- **OOM 风险缓解**：为活动终端写入队列、子 Agent transcript、Replay 事件内存缓存和 Replay Git 快照增加硬上限；高吞吐输出或超大 diff 场景下优先保留最新内容并丢弃旧积压，避免少量窗口也能把 WebView 内存打满。
+
 ### 界面优化
 
 - **调试模式位置与 F12 DevTools**：设置页“调试模式”从终端设置移动到通用设置底部；开启后允许按 F12 打开 DevTools，关闭时 F12 不再触发 DevTools。

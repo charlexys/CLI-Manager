@@ -12,12 +12,144 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// BufReader 容量；默认 8KB 对几 MB 的 jsonl 文件 syscall 次数偏多。
 const READ_BUF_CAPACITY: usize = 64 * 1024;
 /// collect_session_files 的 TTL：避免分析看板/搜索短时间内反复全树扫盘。
 const SESSION_FILES_TTL_MS: i64 = 60_000;
+const OOM_HISTORY_DETAIL_WARN_BYTES: usize = 10 * 1024 * 1024;
+const OOM_HISTORY_STATS_WARN_BYTES: usize = 5 * 1024 * 1024;
+const OOM_HISTORY_MESSAGES_WARN_COUNT: usize = 2_000;
+
+fn estimate_history_detail_content_bytes(detail: &HistorySessionDetail) -> usize {
+    let message_bytes: usize = detail
+        .messages
+        .iter()
+        .map(|message| message.content.len())
+        .sum();
+    let tool_bytes: usize = detail
+        .tool_events
+        .iter()
+        .map(|event| {
+            event.input_summary.as_ref().map_or(0, |value| value.len())
+                + event.output_summary.as_ref().map_or(0, |value| value.len())
+        })
+        .sum();
+    let file_change_bytes: usize = detail
+        .file_changes
+        .iter()
+        .flat_map(|change| change.operations.iter())
+        .map(|operation| {
+            operation.old_text.as_ref().map_or(0, |value| value.len())
+                + operation.new_text.as_ref().map_or(0, |value| value.len())
+                + operation.patch.as_ref().map_or(0, |value| value.len())
+        })
+        .sum();
+    message_bytes + tool_bytes + file_change_bytes
+}
+
+fn history_detail_operation_count(detail: &HistorySessionDetail) -> usize {
+    detail
+        .file_changes
+        .iter()
+        .map(|change| change.operations.len())
+        .sum()
+}
+
+fn log_history_detail_oom_diagnostic(phase: &str, detail: &HistorySessionDetail, elapsed_ms: u128) {
+    let content_bytes = estimate_history_detail_content_bytes(detail);
+    let operation_count = history_detail_operation_count(detail);
+    let threshold_exceeded = content_bytes >= OOM_HISTORY_DETAIL_WARN_BYTES
+        || detail.messages.len() >= OOM_HISTORY_MESSAGES_WARN_COUNT;
+    if threshold_exceeded {
+        warn!(
+            "[oom-diagnostics:backend] area=history phase={phase} source={} project_key={} session_id={} messages={} content_bytes={} token_trend={} tool_events={} file_changes={} file_change_operations={} elapsed_ms={} threshold_exceeded=true",
+            detail.source,
+            detail.project_key,
+            detail.session_id,
+            detail.messages.len(),
+            content_bytes,
+            detail.usage.token_trend.len(),
+            detail.tool_events.len(),
+            detail.file_changes.len(),
+            operation_count,
+            elapsed_ms
+        );
+    } else {
+        info!(
+            "[oom-diagnostics:backend] area=history phase={phase} source={} project_key={} session_id={} messages={} content_bytes={} token_trend={} tool_events={} file_changes={} file_change_operations={} elapsed_ms={} threshold_exceeded=false",
+            detail.source,
+            detail.project_key,
+            detail.session_id,
+            detail.messages.len(),
+            content_bytes,
+            detail.usage.token_trend.len(),
+            detail.tool_events.len(),
+            detail.file_changes.len(),
+            operation_count,
+            elapsed_ms
+        );
+    }
+}
+
+fn estimate_history_stats_response_bytes(response: &HistoryStatsResponse) -> usize {
+    serde_json::to_vec(response).map_or(0, |value| value.len())
+}
+
+fn stats_session_ref_count(response: &HistoryStatsResponse) -> usize {
+    response
+        .heatmap
+        .iter()
+        .map(|item| item.session_refs.len())
+        .sum::<usize>()
+        + response
+            .hourly_activity
+            .iter()
+            .map(|item| item.session_refs.len())
+            .sum::<usize>()
+}
+
+fn log_history_stats_oom_diagnostic(
+    phase: &str,
+    response: &HistoryStatsResponse,
+    elapsed_ms: u128,
+) {
+    let response_bytes = estimate_history_stats_response_bytes(response);
+    let session_ref_count = stats_session_ref_count(response);
+    let threshold_exceeded = response_bytes >= OOM_HISTORY_STATS_WARN_BYTES;
+    if threshold_exceeded {
+        warn!(
+            "[oom-diagnostics:backend] area=history phase={phase} range_days={} total_sessions={} total_messages={} response_bytes={} project_ranking={} model_distribution={} heatmap_days={} daily_series={} hourly_activity={} session_refs={} elapsed_ms={} threshold_exceeded=true",
+            response.range_days,
+            response.total_sessions,
+            response.total_messages,
+            response_bytes,
+            response.project_ranking.len(),
+            response.model_distribution.len(),
+            response.heatmap.len(),
+            response.daily_series.len(),
+            response.hourly_activity.len(),
+            session_ref_count,
+            elapsed_ms
+        );
+    } else {
+        info!(
+            "[oom-diagnostics:backend] area=history phase={phase} range_days={} total_sessions={} total_messages={} response_bytes={} project_ranking={} model_distribution={} heatmap_days={} daily_series={} hourly_activity={} session_refs={} elapsed_ms={} threshold_exceeded=false",
+            response.range_days,
+            response.total_sessions,
+            response.total_messages,
+            response_bytes,
+            response.project_ranking.len(),
+            response.model_distribution.len(),
+            response.heatmap.len(),
+            response.daily_series.len(),
+            response.hourly_activity.len(),
+            session_ref_count,
+            elapsed_ms
+        );
+    }
+}
 
 #[derive(Clone, Default, PartialEq, Eq)]
 struct HistoryRoots {
@@ -787,6 +919,7 @@ pub async fn history_get_session(
     aggregate_subtasks: Option<bool>,
 ) -> Result<HistorySessionDetail, String> {
     tokio::task::spawn_blocking(move || {
+        let started_at = Instant::now();
         let roots = history_roots(claude_config_dir, codex_config_dir);
         debug!(
             "history_get_session request: source={}, project_key={}, file_path={}, claude_root={}, codex_root={}",
@@ -804,7 +937,13 @@ pub async fn history_get_session(
             file_ref.path.to_string_lossy(),
             aggregate_subtasks.unwrap_or(false)
         );
-        build_session_detail(&file_ref, aggregate_subtasks.unwrap_or(false))
+        let detail = build_session_detail(&file_ref, aggregate_subtasks.unwrap_or(false))?;
+        log_history_detail_oom_diagnostic(
+            "history_get_session",
+            &detail,
+            started_at.elapsed().as_millis(),
+        );
+        Ok(detail)
     })
     .await
     .map_err(|err| err.to_string())?
@@ -1243,6 +1382,7 @@ pub async fn history_get_stats(
     end_at: Option<i64>,
     force: Option<bool>,
 ) -> Result<HistoryStatsResponse, String> {
+    let started_at = Instant::now();
     let roots = history_roots(claude_config_dir, codex_config_dir);
     let source_filter = source.map(|v| v.to_lowercase());
     let target_project = project_key
@@ -1261,6 +1401,11 @@ pub async fn history_get_stats(
 
     if !force {
         if let Some(response) = stats_aggregation_cache_get(&cache_key) {
+            log_history_stats_oom_diagnostic(
+                "history_get_stats_cache_hit",
+                &response,
+                started_at.elapsed().as_millis(),
+            );
             return Ok(response);
         }
     }
@@ -1295,6 +1440,11 @@ pub async fn history_get_stats(
     };
 
     let response = build_history_stats_response(&daily_index.days, bounds);
+    log_history_stats_oom_diagnostic(
+        "history_get_stats",
+        &response,
+        started_at.elapsed().as_millis(),
+    );
     stats_aggregation_cache_set(cache_key, response.clone());
     Ok(response)
 }

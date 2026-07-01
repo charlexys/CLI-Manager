@@ -771,7 +771,6 @@ function PaneTabBar({
   const paneFullscreenLabel = isPaneFullscreen
     ? t("terminal.toolbar.exitImmersiveFullscreen")
     : t("terminal.toolbar.enterImmersiveFullscreen");
-  const overflowControlsVisible = variant === "pane" && tabScrollState.isOverflowing;
   const tabScrollSignature = paneSessions
     .map((session) => `${session.id}:${session.title}:${tabNotifications[session.id] ?? "none"}`)
     .join("|");
@@ -955,15 +954,12 @@ function PaneTabBar({
       data-drop-target={isOver ? "true" : "false"}
       data-chrome-variant={variant}
     >
-      {variant === "pane" && (
+      {variant === "pane" && tabScrollState.isOverflowing && (
         <button
           type="button"
           className="ui-terminal-tab-scroll-button ui-terminal-tab-scroll-button-left"
           onClick={() => scrollPaneTabs(-1)}
-          disabled={!overflowControlsVisible || !tabScrollState.canScrollLeft}
-          data-visible={overflowControlsVisible ? "true" : "false"}
-          aria-hidden={!overflowControlsVisible}
-          tabIndex={overflowControlsVisible ? 0 : -1}
+          disabled={!tabScrollState.canScrollLeft}
           aria-label={t("terminal.tab.scrollLeft")}
           title={t("terminal.tab.scrollLeft")}
         >
@@ -1037,16 +1033,13 @@ function PaneTabBar({
           ))}
         </SortableContext>
       </div>
-      {variant === "pane" && (
+      {variant === "pane" && tabScrollState.isOverflowing && (
         <>
           <button
             type="button"
             className="ui-terminal-tab-scroll-button ui-terminal-tab-scroll-button-right"
             onClick={() => scrollPaneTabs(1)}
-            disabled={!overflowControlsVisible || !tabScrollState.canScrollRight}
-            data-visible={overflowControlsVisible ? "true" : "false"}
-            aria-hidden={!overflowControlsVisible}
-            tabIndex={overflowControlsVisible ? 0 : -1}
+            disabled={!tabScrollState.canScrollRight}
             aria-label={t("terminal.tab.scrollRight")}
             title={t("terminal.tab.scrollRight")}
           >
@@ -1057,13 +1050,9 @@ function PaneTabBar({
               <button
                 type="button"
                 className="ui-terminal-tab-list-button"
-                data-visible={overflowControlsVisible ? "true" : "false"}
-                aria-hidden={!overflowControlsVisible}
-                tabIndex={overflowControlsVisible ? 0 : -1}
                 aria-label={t("terminal.tab.openList")}
                 aria-expanded={tabListOpen && tabScrollState.isOverflowing}
                 title={t("terminal.tab.list")}
-                disabled={!overflowControlsVisible}
               >
                 <ChevronDown size={14} strokeWidth={1.8} aria-hidden="true" />
               </button>
@@ -1563,11 +1552,13 @@ function TerminalCloseConfirmBubble({
   menuStyle,
   onConfirm,
   onClose,
+  shouldIgnoreOutsideInteraction,
 }: {
   confirm: TerminalCloseConfirmState;
   menuStyle: CSSProperties;
   onConfirm: () => void;
   onClose: () => void;
+  shouldIgnoreOutsideInteraction: () => boolean;
 }) {
   const { t } = useI18n();
   const anchorStyle: CSSProperties = confirm
@@ -1585,6 +1576,9 @@ function TerminalCloseConfirmBubble({
         style={menuStyle}
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => event.preventDefault()}
+        onInteractOutside={(event) => {
+          if (shouldIgnoreOutsideInteraction()) event.preventDefault();
+        }}
       >
         <div className="flex items-center gap-1">
           <Button size="icon" variant="ghost" className="h-6 w-6" onClick={onClose} aria-label={t("terminal.close.cancel")} title={t("terminal.close.cancel")}>
@@ -1713,6 +1707,7 @@ export function TerminalTabs({
   const splitPickerOpenFrameRef = useRef<number | null>(null);
   const splitPickerOpenTimerRef = useRef<number | null>(null);
   const splitPickerOutsideGuardUntilRef = useRef(0);
+  const closeConfirmOutsideGuardUntilRef = useRef(0);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const toolbarSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -1885,6 +1880,14 @@ export function TerminalTabs({
     return Date.now() < splitPickerOutsideGuardUntilRef.current;
   }, []);
 
+  const armCloseConfirmOutsideGuard = useCallback(() => {
+    closeConfirmOutsideGuardUntilRef.current = Date.now() + 180;
+  }, []);
+
+  const shouldIgnoreCloseConfirmOutsideInteraction = useCallback(() => {
+    return Date.now() < closeConfirmOutsideGuardUntilRef.current;
+  }, []);
+
   const handleNewTab = useCallback(async () => {
     const newTerminalContext =
       activeSession?.kind === "subagent-transcript"
@@ -1993,11 +1996,12 @@ export function TerminalTabs({
     }
 
     const position = resolveCloseConfirmAnchor(anchor ?? findCloseConfirmAnchor(uniqueSessionIds));
+    armCloseConfirmOutsideGuard();
     setCloseConfirm({
       sessionIds: uniqueSessionIds,
       ...position,
     });
-  }, [closeSessionIds, findCloseConfirmAnchor, resolveCloseConfirmAnchor, sessions]);
+  }, [armCloseConfirmOutsideGuard, closeSessionIds, findCloseConfirmAnchor, resolveCloseConfirmAnchor, sessions]);
 
   const confirmCloseSessions = useCallback(() => {
     if (!closeConfirm) return;
@@ -2628,6 +2632,7 @@ export function TerminalTabs({
         menuStyle={splitPickerMenuStyle}
         onConfirm={confirmCloseSessions}
         onClose={cancelCloseSessions}
+        shouldIgnoreOutsideInteraction={shouldIgnoreCloseConfirmOutsideInteraction}
       />
 
       <div className="relative flex-1 min-h-0 overflow-hidden">
